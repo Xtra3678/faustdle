@@ -1,92 +1,99 @@
-import { ArchipelagoClient } from '@archipelago.gg/client';
+import { EventEmitter } from 'events';
+import { ArchipelagoClient } from 'archipelago.js';
 
-export class GameClient {
+class FaustdleAPClient extends EventEmitter {
     constructor() {
+        super();
         this.client = null;
         this.connected = false;
-        this.deathLink = false;
+        this.hints = [];
+        this.gameMode = null;
     }
 
-    async connect(address, name, password = '') {
+    async connect(address, port, slot, password = '') {
         try {
             this.client = new ArchipelagoClient();
+            await this.client.connect({ hostname: address, port, game: 'Faustdle', name: slot, password });
             
-            await this.client.connect({
-                hostname: address,
-                port: 38281,
-                game: 'Faustdle',
-                name: name,
-                password: password,
-                items_handling: 0,
-                tags: ['DeathLink'],
-                version: {
-                    major: 0,
-                    minor: 4,
-                    build: 2
-                }
-            });
-
             this.connected = true;
             this.setupListeners();
+            this.emit('connected');
             return true;
         } catch (error) {
             console.error('Failed to connect:', error);
+            this.emit('error', error);
             return false;
         }
-    }
-
-    setupListeners() {
-        this.client.addListener('RoomUpdate', (packet) => {
-            if (packet.tags?.includes('DeathLink')) {
-                this.deathLink = true;
-            }
-        });
-
-        this.client.addListener('ReceivedItems', (packet) => {
-            if (packet.type === 'DeathLink' && this.deathLink) {
-                this.onDeathLinkReceived();
-            }
-        });
-    }
-
-    sendHint(difficulty) {
-        if (!this.connected) return;
-
-        const hintWeight = this.calculateHintWeight(difficulty);
-        this.client.send({
-            cmd: 'Hint',
-            weight: hintWeight,
-            found: true
-        });
-    }
-
-    calculateHintWeight(difficulty) {
-        switch(difficulty) {
-            case 'E': return 1;
-            case 'H': return 2;
-            case 'F': return 3;
-            default: return 1;
-        }
-    }
-
-    sendDeathLink() {
-        if (!this.connected || !this.deathLink) return;
-
-        this.client.send({
-            cmd: 'DeathLink',
-            cause: 'Failed to guess character'
-        });
-    }
-
-    onDeathLinkReceived() {
-        // Trigger a death in the game
-        document.dispatchEvent(new CustomEvent('apDeathLink'));
     }
 
     disconnect() {
         if (this.client) {
             this.client.disconnect();
+            this.client = null;
             this.connected = false;
+            this.hints = [];
+            this.emit('disconnected');
         }
     }
+
+    setupListeners() {
+        this.client.addListener('ReceivedItems', (items) => {
+            // Handle received items (hints)
+            this.processReceivedItems(items);
+        });
+
+        this.client.addListener('RoomUpdate', (room) => {
+            // Handle room updates
+            this.emit('roomUpdate', room);
+        });
+    }
+
+    processReceivedItems(items) {
+        // Convert items into hints based on difficulty
+        const newHints = items.map(item => this.convertItemToHint(item));
+        this.hints.push(...newHints);
+        this.emit('hintsUpdated', this.hints);
+    }
+
+    convertItemToHint(item) {
+        // Convert AP items into game-specific hints
+        // This is where you'd implement the hint generation logic
+        const hintTypes = {
+            normal: ['gender', 'affiliation', 'devil_fruit', 'haki', 'origin'],
+            hard: ['bounty', 'height', 'arc', 'status', 'occupation'],
+            filler: ['all']
+        };
+
+        const selectedType = this.getHintType();
+        return {
+            type: selectedType,
+            value: item.item,
+            progression: Math.random() < 0.7 // 70% chance for progression hint
+        };
+    }
+
+    getHintType() {
+        const types = {
+            normal: ['gender', 'affiliation', 'devil_fruit'],
+            hard: ['bounty', 'height', 'arc'],
+            filler: ['all']
+        };
+
+        const availableTypes = types[this.gameMode] || types.normal;
+        return availableTypes[Math.floor(Math.random() * availableTypes.length)];
+    }
+
+    setGameMode(mode) {
+        this.gameMode = mode;
+    }
+
+    getHints() {
+        return this.hints;
+    }
+
+    isConnected() {
+        return this.connected;
+    }
 }
+
+export const apClient = new FaustdleAPClient();
