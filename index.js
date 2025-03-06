@@ -15,32 +15,41 @@ class GameApp {
         this.guessCount = 0;
         
         // Initialize components after DOM is loaded
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.initialize());
-        } else {
-            this.initialize();
-        }
+        document.addEventListener('DOMContentLoaded', () => this.initialize());
     }
 
     initialize() {
-        this.initializeArchipelago();
-        this.setupEventListeners();
-        this.updateDailyCountdown();
-        this.setupAutocomplete();
-        console.log('GameApp initialized');
+        try {
+            this.initializeArchipelago();
+            this.setupEventListeners();
+            this.updateDailyCountdown();
+            this.setupAutocomplete();
+            console.log('GameApp initialized');
+        } catch (error) {
+            console.error('Error during initialization:', error);
+        }
     }
 
     initializeArchipelago() {
-        this.archipelagoClient = new GameClient();
-        new ArchipelagoConnect(this);
-        
-        document.addEventListener('apDeathLink', () => {
-            this.handleDeathLink();
-        });
+        try {
+            this.archipelagoClient = new GameClient();
+            new ArchipelagoConnect(this);
+            
+            document.addEventListener('apDeathLink', () => {
+                this.handleDeathLink();
+            });
+        } catch (error) {
+            console.error('Error initializing Archipelago:', error);
+        }
     }
 
     async connectToArchipelago(address, name, password) {
-        return await this.archipelagoClient.connect(address, name, password);
+        try {
+            return await this.archipelagoClient.connect(address, name, password);
+        } catch (error) {
+            console.error('Error connecting to Archipelago:', error);
+            return false;
+        }
     }
 
     handleDeathLink() {
@@ -48,7 +57,7 @@ class GameApp {
         document.getElementById('game-play').classList.add('hidden');
         document.getElementById('game-over').classList.remove('hidden');
         document.getElementById('game-over-message').textContent = 'Game Over - Death Link Activated!';
-        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
+        document.getElementById('correct-character').textContent = this.chosenCharacter?.name || 'Unknown';
     }
 
     setupEventListeners() {
@@ -388,6 +397,7 @@ class GameApp {
         this.guessHistory = [];
         this.gameMode = null;
         this.startTime = null;
+        this.guessCount = 0;
         if (this.elapsedTimeInterval) {
             clearInterval(this.elapsedTimeInterval);
             this.elapsedTimeInterval = null;
@@ -498,4 +508,6 @@ class GameApp {
 }
 
 // Initialize the game
-new GameApp();
+window.addEventListener('load', () => {
+    new GameApp();
+});
