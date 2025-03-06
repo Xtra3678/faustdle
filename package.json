@@ -1,12 +1,12 @@
 {
   "name": "faustdle",
   "version": "1.0.0",
-  "description": "One Piece Character Guessing Game with Archipelago Integration",
+  "description": "One Piece Character Guessing Game",
   "type": "module",
   "dependencies": {
     "seedrandom": "^3.0.5",
-    "@archipelago.gg/client": "^1.1.0",
-    "ws": "^8.16.0"
+    "archipelago.js": "^1.1.0",
+    "events": "^3.3.0"
   },
   "devDependencies": {
     "vite": "^5.0.10"
