@@ -1,51 +1,95 @@
 import { EventEmitter } from 'events';
-import { ArchipelagoClient } from 'archipelago.js';
 
 class FaustdleAPClient extends EventEmitter {
     constructor() {
         super();
-        this.client = null;
+        this.socket = null;
         this.connected = false;
         this.hints = [];
         this.gameMode = null;
     }
 
-    async connect(address, port, slot, password = '') {
+    async connect(hostname, port, slot, password = '') {
         try {
-            this.client = new ArchipelagoClient();
-            await this.client.connect({ hostname: address, port, game: 'Faustdle', name: slot, password });
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${hostname}:${port}`;
             
-            this.connected = true;
-            this.setupListeners();
-            this.emit('connected');
+            this.socket = new WebSocket(wsUrl);
+            
+            this.socket.onopen = () => {
+                console.log('WebSocket connected');
+                this.sendConnect(slot, password);
+            };
+            
+            this.socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                } catch (error) {
+                    console.error('Failed to parse message:', error);
+                }
+            };
+            
+            this.socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                this.emit('error', error);
+            };
+            
+            this.socket.onclose = () => {
+                console.log('WebSocket closed');
+                this.connected = false;
+                this.emit('disconnected');
+            };
+            
             return true;
         } catch (error) {
-            console.error('Failed to connect:', error);
-            this.emit('error', error);
+            console.error('Connection failed:', error);
             return false;
         }
     }
 
-    disconnect() {
-        if (this.client) {
-            this.client.disconnect();
-            this.client = null;
-            this.connected = false;
-            this.hints = [];
-            this.emit('disconnected');
+    sendConnect(slot, password) {
+        const packet = {
+            cmd: 'Connect',
+            game: 'Faustdle',
+            name: slot,
+            password: password,
+            uuid: crypto.randomUUID(),
+            items_handling: 0,
+            version: {
+                major: 0,
+                minor: 4,
+                build: 2
+            },
+            tags: ['AP']
+        };
+        this.send(packet);
+    }
+
+    send(packet) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            const message = JSON.stringify(packet);
+            console.log('Sending:', message);
+            this.socket.send(message);
         }
     }
 
-    setupListeners() {
-        if (!this.client) return;
-
-        this.client.addListener('ReceivedItems', (items) => {
-            this.processReceivedItems(items);
-        });
-
-        this.client.addListener('RoomUpdate', (room) => {
-            this.emit('roomUpdate', room);
-        });
+    handleMessage(data) {
+        console.log('Received:', data);
+        if (typeof data === 'object' && data !== null) {
+            switch (data.cmd) {
+                case 'Connected':
+                    this.connected = true;
+                    this.emit('connected');
+                    break;
+                case 'ReceivedItems':
+                    this.processReceivedItems(data.items);
+                    break;
+                case 'RoomUpdate':
+                    this.emit('roomUpdate', data);
+                    break;
+            }
+        }
     }
 
     processReceivedItems(items) {
@@ -56,8 +100,8 @@ class FaustdleAPClient extends EventEmitter {
 
     convertItemToHint(item) {
         const hintTypes = {
-            normal: ['gender', 'affiliation', 'devil_fruit', 'haki', 'origin'],
-            hard: ['bounty', 'height', 'arc', 'status', 'occupation'],
+            normal: ['gender', 'affiliation', 'devil_fruit'],
+            hard: ['bounty', 'height', 'arc'],
             filler: ['all']
         };
 
@@ -92,8 +136,13 @@ class FaustdleAPClient extends EventEmitter {
         return this.connected;
     }
 
-    addListener(event, callback) {
-        this.on(event, callback);
+    disconnect() {
+        if (this.socket) {
+            this.socket.close();
+            this.socket = null;
+            this.connected = false;
+            this.hints = [];
+        }
     }
 }
 
