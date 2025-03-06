@@ -37,27 +37,24 @@ class FaustdleAPClient extends EventEmitter {
     }
 
     setupListeners() {
+        if (!this.client) return;
+
         this.client.addListener('ReceivedItems', (items) => {
-            // Handle received items (hints)
             this.processReceivedItems(items);
         });
 
         this.client.addListener('RoomUpdate', (room) => {
-            // Handle room updates
             this.emit('roomUpdate', room);
         });
     }
 
     processReceivedItems(items) {
-        // Convert items into hints based on difficulty
         const newHints = items.map(item => this.convertItemToHint(item));
         this.hints.push(...newHints);
         this.emit('hintsUpdated', this.hints);
     }
 
     convertItemToHint(item) {
-        // Convert AP items into game-specific hints
-        // This is where you'd implement the hint generation logic
         const hintTypes = {
             normal: ['gender', 'affiliation', 'devil_fruit', 'haki', 'origin'],
             hard: ['bounty', 'height', 'arc', 'status', 'occupation'],
@@ -68,7 +65,7 @@ class FaustdleAPClient extends EventEmitter {
         return {
             type: selectedType,
             value: item.item,
-            progression: Math.random() < 0.7 // 70% chance for progression hint
+            progression: Math.random() < 0.7
         };
     }
 
@@ -93,6 +90,10 @@ class FaustdleAPClient extends EventEmitter {
 
     isConnected() {
         return this.connected;
+    }
+
+    addListener(event, callback) {
+        this.on(event, callback);
     }
 }
 

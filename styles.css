@@ -351,12 +351,14 @@ tr:hover {
     font-size: 0.875rem;
   }
 }
+
 .btn-ap {
   position: fixed;
   bottom: 20px;
   right: 20px;
   background: #4f46e5;
   z-index: 1000;
+  margin-left: 1rem;
 }
 
 .btn-ap:hover {
@@ -398,6 +400,13 @@ tr:hover {
   display: flex;
   gap: 1rem;
   margin-top: 1.5rem;
+}
+
+.ap-hints-container {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 0.5rem;
 }
 
 .ap-hint {

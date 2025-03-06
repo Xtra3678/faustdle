@@ -1,7 +1,7 @@
 import { names, arcs, haki } from './data/characters.js';
 import { compareTraits } from './utils/gameLogic.js';
-import { GameClient } from './src/archipelago/client.js';
-import { ArchipelagoConnect } from './src/components/ArchipelagoConnect.js';
+import { APConnection } from './src/components/APConnection.js';
+import { apClient } from './src/archipelago/client.js';
 
 class GameApp {
     constructor() {
@@ -11,98 +11,193 @@ class GameApp {
         this.gameMode = null;
         this.startTime = null;
         this.elapsedTimeInterval = null;
-        this.archipelagoClient = null;
-        this.guessCount = 0;
-        
-        // Initialize components after DOM is loaded
-        document.addEventListener('DOMContentLoaded', () => this.initialize());
+        this.setupEventListeners();
+        this.updateDailyCountdown();
+        this.initializeAP();
+        console.log('GameApp initialized');
     }
 
-    initialize() {
-        try {
-            this.initializeArchipelago();
-            this.setupEventListeners();
-            this.updateDailyCountdown();
-            this.setupAutocomplete();
-            console.log('GameApp initialized');
-        } catch (error) {
-            console.error('Error during initialization:', error);
+    initializeAP() {
+        // Create AP connection UI
+        const seedGenerator = document.querySelector('.seed-generator');
+        if (seedGenerator) {
+            new APConnection(seedGenerator);
         }
-    }
 
-    initializeArchipelago() {
-        try {
-            this.archipelagoClient = new GameClient();
-            new ArchipelagoConnect(this);
+        // Listen for AP connection requests
+        document.addEventListener('ap-connect-request', async (event) => {
+            const { address, port, slot, password } = event.detail;
+            const success = await apClient.connect(address, port, slot, password);
             
-            document.addEventListener('apDeathLink', () => {
-                this.handleDeathLink();
+            if (success) {
+                alert('Connected to Archipelago!');
+                this.setupAPHints();
+            } else {
+                alert('Failed to connect to Archipelago. Please check your connection details.');
+            }
+        });
+    }
+
+    setupAPHints() {
+        // Create hints container if it doesn't exist
+        let hintsContainer = document.getElementById('ap-hints');
+        if (!hintsContainer) {
+            hintsContainer = document.createElement('div');
+            hintsContainer.id = 'ap-hints';
+            hintsContainer.className = 'ap-hints-container';
+            document.querySelector('.container').appendChild(hintsContainer);
+        }
+
+        // Listen for new hints
+        apClient.addListener('hintsUpdated', (hints) => {
+            hintsContainer.innerHTML = '';
+            hints.forEach(hint => {
+                const hintElement = document.createElement('div');
+                hintElement.className = `ap-hint ${hint.progression ? 'progression' : ''}`;
+                hintElement.textContent = `Hint: ${hint.type} - ${hint.value}`;
+                hintsContainer.appendChild(hintElement);
             });
-        } catch (error) {
-            console.error('Error initializing Archipelago:', error);
-        }
-    }
-
-    async connectToArchipelago(address, name, password) {
-        try {
-            return await this.archipelagoClient.connect(address, name, password);
-        } catch (error) {
-            console.error('Error connecting to Archipelago:', error);
-            return false;
-        }
-    }
-
-    handleDeathLink() {
-        this.stopElapsedTimer();
-        document.getElementById('game-play').classList.add('hidden');
-        document.getElementById('game-over').classList.remove('hidden');
-        document.getElementById('game-over-message').textContent = 'Game Over - Death Link Activated!';
-        document.getElementById('correct-character').textContent = this.chosenCharacter?.name || 'Unknown';
+        });
     }
 
     setupEventListeners() {
         console.log('Setting up event listeners');
         
         // Game mode buttons
-        document.getElementById('normal-mode')?.addEventListener('click', () => this.startGame('normal'));
-        document.getElementById('hard-mode')?.addEventListener('click', () => this.startGame('hard'));
-        document.getElementById('filler-mode')?.addEventListener('click', () => this.startGame('filler'));
-        document.getElementById('daily-mode')?.addEventListener('click', () => this.startDailyGame());
-        document.getElementById('seed-start')?.addEventListener('click', () => this.startGameWithSeed());
-        document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
-        document.getElementById('skip-button')?.addEventListener('click', () => this.skipGame());
-        document.getElementById('play-again')?.addEventListener('click', () => this.resetGame());
-        document.getElementById('generate-seed')?.addEventListener('click', () => {
-            document.getElementById('game-setup').classList.add('hidden');
-            document.getElementById('seed-generator').classList.remove('hidden');
-            this.setupCharacterAutocomplete();
-        });
-        document.getElementById('generate-seed-for-character')?.addEventListener('click', () => this.generateSeedForCharacter());
-        document.getElementById('use-generated-seed')?.addEventListener('click', () => {
-            const generatedSeed = document.getElementById('seed-result').textContent;
-            document.getElementById('seed-generator').classList.add('hidden');
-            document.getElementById('game-setup').classList.remove('hidden');
-            document.getElementById('seed-input').value = generatedSeed;
-        });
-        document.getElementById('back-to-main')?.addEventListener('click', () => {
-            document.getElementById('seed-generator').classList.add('hidden');
-            document.getElementById('game-setup').classList.remove('hidden');
-            document.getElementById('character-input').value = '';
-            document.getElementById('generated-seed').classList.add('hidden');
-        });
+        const normalModeButton = document.getElementById('normal-mode');
+        const hardModeButton = document.getElementById('hard-mode');
+        const fillerModeButton = document.getElementById('filler-mode');
+        const dailyModeButton = document.getElementById('daily-mode');
+        const seedStartButton = document.getElementById('seed-start');
+        const guessButton = document.getElementById('guess-button');
+        const skipButton = document.getElementById('skip-button');
+        const playAgainButton = document.getElementById('play-again');
+        const generateSeedButton = document.getElementById('generate-seed');
+        const generateSeedForCharacterButton = document.getElementById('generate-seed-for-character');
+        const useGeneratedSeedButton = document.getElementById('use-generated-seed');
+        const backToMainButton = document.getElementById('back-to-main');
 
-        // Setup input enter key handlers
-        document.getElementById('guess-input')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.makeGuess();
-        });
+        if (normalModeButton) {
+            normalModeButton.addEventListener('click', () => {
+                console.log('Normal mode button clicked');
+                this.startGame('normal');
+            });
+        }
 
-        document.getElementById('seed-input')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.startGameWithSeed();
-        });
+        if (hardModeButton) {
+            hardModeButton.addEventListener('click', () => {
+                console.log('Hard mode button clicked');
+                this.startGame('hard');
+            });
+        }
 
-        document.getElementById('character-input')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.generateSeedForCharacter();
-        });
+        if (fillerModeButton) {
+            fillerModeButton.addEventListener('click', () => {
+                console.log('Filler mode button clicked');
+                this.startGame('filler');
+            });
+        }
+
+        if (dailyModeButton) {
+            dailyModeButton.addEventListener('click', () => {
+                console.log('Daily mode button clicked');
+                this.startDailyGame();
+            });
+        }
+
+        if (generateSeedButton) {
+            generateSeedButton.addEventListener('click', () => {
+                console.log('Generate seed button clicked');
+                document.getElementById('game-setup').classList.add('hidden');
+                document.getElementById('seed-generator').classList.remove('hidden');
+                this.setupCharacterAutocomplete();
+            });
+        }
+
+        if (generateSeedForCharacterButton) {
+            generateSeedForCharacterButton.addEventListener('click', () => {
+                this.generateSeedForCharacter();
+            });
+        }
+
+        if (useGeneratedSeedButton) {
+            useGeneratedSeedButton.addEventListener('click', () => {
+                const generatedSeed = document.getElementById('seed-result').textContent;
+                document.getElementById('seed-generator').classList.add('hidden');
+                document.getElementById('game-setup').classList.remove('hidden');
+                document.getElementById('seed-input').value = generatedSeed;
+            });
+        }
+
+        if (backToMainButton) {
+            backToMainButton.addEventListener('click', () => {
+                document.getElementById('seed-generator').classList.add('hidden');
+                document.getElementById('game-setup').classList.remove('hidden');
+                document.getElementById('character-input').value = '';
+                document.getElementById('generated-seed').classList.add('hidden');
+            });
+        }
+
+        if (seedStartButton) {
+            seedStartButton.addEventListener('click', () => {
+                console.log('Seed start button clicked');
+                this.startGameWithSeed();
+            });
+        }
+
+        if (guessButton) {
+            guessButton.addEventListener('click', () => {
+                console.log('Guess button clicked');
+                this.makeGuess();
+            });
+        }
+
+        if (skipButton) {
+            skipButton.addEventListener('click', () => {
+                console.log('Skip button clicked');
+                this.skipGame();
+            });
+        }
+
+        if (playAgainButton) {
+            playAgainButton.addEventListener('click', () => {
+                console.log('Play again button clicked');
+                this.resetGame();
+            });
+        }
+
+        // Setup guess input enter key
+        const guessInput = document.getElementById('guess-input');
+        if (guessInput) {
+            guessInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    console.log('Enter key pressed in guess input');
+                    this.makeGuess();
+                }
+            });
+        }
+
+        // Setup seed input enter key
+        const seedInput = document.getElementById('seed-input');
+        if (seedInput) {
+            seedInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    console.log('Enter key pressed in seed input');
+                    this.startGameWithSeed();
+                }
+            });
+        }
+
+        // Setup character input enter key
+        const characterInput = document.getElementById('character-input');
+        if (characterInput) {
+            characterInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    console.log('Enter key pressed in character input');
+                    this.generateSeedForCharacter();
+                }
+            });
+        }
     }
 
     updateDailyCountdown() {
@@ -120,50 +215,16 @@ class GameApp {
             const resultCountdownTimer = document.getElementById('result-countdown-timer');
             
             const timerText = `${hours}h ${minutes}m ${seconds}s`;
-            if (countdownTimer) countdownTimer.textContent = timerText;
-            if (resultCountdownTimer) resultCountdownTimer.textContent = timerText;
+            if (countdownTimer) {
+                countdownTimer.textContent = timerText;
+            }
+            if (resultCountdownTimer) {
+                resultCountdownTimer.textContent = timerText;
+            }
         };
 
         updateTimer();
         setInterval(updateTimer, 1000);
-    }
-
-    startElapsedTimer() {
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-        }
-
-        this.startTime = Date.now();
-        const elapsedTimer = document.getElementById('elapsed-timer');
-        
-        const updateElapsedTime = () => {
-            const elapsed = Date.now() - this.startTime;
-            const minutes = Math.floor(elapsed / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            if (elapsedTimer) {
-                elapsedTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-        };
-
-        updateElapsedTime(); // Update immediately
-        this.elapsedTimeInterval = setInterval(updateElapsedTime, 1000);
-    }
-
-    stopElapsedTimer() {
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-            this.elapsedTimeInterval = null;
-        }
-
-        if (this.startTime) {
-            const elapsed = Date.now() - this.startTime;
-            const minutes = Math.floor(elapsed / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            const finalTime = document.getElementById('final-time');
-            if (finalTime) {
-                finalTime.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-        }
     }
 
     generateSeedForCharacter() {
@@ -175,6 +236,7 @@ class GameApp {
             return;
         }
 
+        // Generate a unique seed for this character
         const characterSeed = this.generateUniqueSeedForCharacter(character);
         
         document.getElementById('seed-result').textContent = characterSeed;
@@ -193,7 +255,9 @@ class GameApp {
             const index = Math.floor(Math.random() * characterNames.length);
             const selectedName = characterNames[index];
             
+            // Check if the selected character matches the desired character
             if (selectedName === character) {
+                // Verify that the character would actually be selectable in some mode
                 const difficulty = names[character][9];
                 if (difficulty === 'E' || difficulty === 'H' || difficulty === 'F') {
                     return seed;
@@ -240,6 +304,37 @@ class GameApp {
         });
     }
 
+    startElapsedTimer() {
+        this.startTime = Date.now();
+        const elapsedTimer = document.getElementById('elapsed-timer');
+        
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+        }
+
+        this.elapsedTimeInterval = setInterval(() => {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            elapsedTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    stopElapsedTimer() {
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+            this.elapsedTimeInterval = null;
+        }
+
+        if (this.startTime) {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            document.getElementById('final-time').textContent = 
+                `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }
+
     getDailySeed() {
         const date = new Date();
         return `${date.getUTCFullYear()}-${date.getUTCMonth() + 1}-${date.getUTCDate()}`;
@@ -264,7 +359,9 @@ class GameApp {
             return;
         }
 
+        // Easter egg: Check for "imu" seed
         if (seedInput.value.toLowerCase() === 'imu') {
+            // Reload the page
             window.location.reload();
             return;
         }
@@ -287,19 +384,24 @@ class GameApp {
         document.getElementById('skip-button').classList.remove('hidden');
         this.chosenCharacter = this.selectRandomCharacter(mode, this.currentSeed);
         this.startElapsedTimer();
+        
+        // Update AP client with game mode
+        if (apClient.isConnected()) {
+            apClient.setGameMode(mode);
+        }
     }
 
     generateEmojiGrid() {
         return [...this.guessHistory].reverse().map(guess => {
             return guess.map(result => {
                 if (result.match) {
-                    return '🟩';
+                    return '🟩'; // Green square emoji
                 } else if (result.direction === 'up') {
-                    return '⬆️';
+                    return '⬆️'; // Up arrow emoji
                 } else if (result.direction === 'down') {
-                    return '⬇️';
+                    return '⬇️'; // Down arrow emoji
                 } else {
-                    return '🟥';
+                    return '🟥'; // Red square emoji
                 }
             }).join('');
         }).join('\n');
@@ -318,7 +420,7 @@ class GameApp {
         this.stopElapsedTimer();
         document.getElementById('game-play').classList.add('hidden');
         document.getElementById('game-over').classList.remove('hidden');
-        document.getElementById('game-over-message').textContent = 'Game skipped - No hint given!';
+        document.getElementById('game-over-message').textContent = 'Game skipped!';
         document.getElementById('correct-character').textContent = this.chosenCharacter.name;
         document.getElementById('game-seed').textContent = this.currentSeed;
         document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
@@ -334,22 +436,10 @@ class GameApp {
             alert('Invalid name, try again.');
             return;
         }
-
-        this.guessCount++;
-        
-        if (this.guessCount > 10 && this.archipelagoClient?.deathLink) {
-            this.archipelagoClient.sendDeathLink();
-            this.handleDeathLink();
-            return;
-        }
         
         if (guess === this.chosenCharacter.name) {
             const results = compareTraits(names[guess], this.chosenCharacter.traits);
             this.guessHistory.push(results);
-            
-            if (this.archipelagoClient?.connected) {
-                this.archipelagoClient.sendHint(this.chosenCharacter.traits[9]);
-            }
             
             this.stopElapsedTimer();
             document.getElementById('game-play').classList.add('hidden');
@@ -357,6 +447,7 @@ class GameApp {
             document.getElementById('game-over-message').textContent = 'Congratulations! You found the correct character!';
             document.getElementById('correct-character').textContent = this.chosenCharacter.name;
             
+            // Only show seed if not in daily mode
             const gameSeedContainer = document.getElementById('game-seed-container');
             if (this.gameMode === 'daily') {
                 gameSeedContainer.classList.add('hidden');
@@ -367,6 +458,7 @@ class GameApp {
             
             document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
             
+            // Show daily countdown in results for daily mode
             if (this.gameMode === 'daily') {
                 document.getElementById('daily-result-countdown').classList.remove('hidden');
             }
@@ -397,7 +489,6 @@ class GameApp {
         this.guessHistory = [];
         this.gameMode = null;
         this.startTime = null;
-        this.guessCount = 0;
         if (this.elapsedTimeInterval) {
             clearInterval(this.elapsedTimeInterval);
             this.elapsedTimeInterval = null;
@@ -411,7 +502,7 @@ class GameApp {
         let selectedName;
         let selectedTraits;
         let attempts = 0;
-        const maxAttempts = 1000;
+        const maxAttempts = 1000; // Prevent infinite loop
         
         do {
             const index = Math.floor(Math.random() * characterNames.length);
@@ -472,8 +563,6 @@ class GameApp {
 
     setupAutocomplete() {
         const guessInput = document.getElementById('guess-input');
-        if (!guessInput) return;
-
         const autocompleteList = document.createElement('ul');
         autocompleteList.className = 'autocomplete-list';
         guessInput.parentNode.appendChild(autocompleteList);
@@ -507,7 +596,9 @@ class GameApp {
     }
 }
 
-// Initialize the game
-window.addEventListener('load', () => {
-    new GameApp();
+// Initialize the game when the DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM fully loaded and parsed');
+    const game = new GameApp();
+    game.setupAutocomplete();
 });
