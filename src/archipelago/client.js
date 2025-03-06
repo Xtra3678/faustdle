@@ -1,4 +1,4 @@
-import { ArchipelagoClient } from 'archipelago.js';
+import { ArchipelagoClient } from '@archipelago.gg/client';
 
 export class GameClient {
     constructor() {
@@ -17,6 +17,7 @@ export class GameClient {
                 game: 'Faustdle',
                 name: name,
                 password: password,
+                items_handling: 0,
                 tags: ['DeathLink'],
                 version: {
                     major: 0,

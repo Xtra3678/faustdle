@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "seedrandom": "^3.0.5",
-    "archipelago.js": "^1.0.0",
+    "@archipelago.gg/client": "^1.1.0",
     "ws": "^8.16.0"
   },
   "devDependencies": {
