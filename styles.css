@@ -351,3 +351,66 @@ tr:hover {
     font-size: 0.875rem;
   }
 }
+.button-group {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.btn-ap {
+  background: #4f46e5;
+}
+
+.btn-ap:hover {
+  background: #4338ca;
+}
+
+.ap-form {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 2rem;
+  background: #e2bd8cad;
+  border-radius: 0.5rem;
+}
+
+.checkbox-group {
+  margin: 1rem 0;
+  text-align: center;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 1.2rem;
+  height: 1.2rem;
+  cursor: pointer;
+}
+
+#ap-status {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+#ap-status .status-message {
+  font-weight: 600;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+
+#ap-status .status-message.success {
+  background: #24d47633;
+  color: #24D475;
+}
+
+#ap-status .status-message.error {
+  background: #ff373733;
+  color: #ff3737;
+}

@@ -1,5 +1,7 @@
 import { names, arcs, haki } from './data/characters.js';
 import { compareTraits } from './utils/gameLogic.js';
+import { GameClient } from './src/archipelago/client.js';
+import { ArchipelagoConnect } from './src/components/ArchipelagoConnect.js';
 
 class GameApp {
     constructor() {
@@ -9,9 +11,33 @@ class GameApp {
         this.gameMode = null;
         this.startTime = null;
         this.elapsedTimeInterval = null;
+        this.archipelagoClient = null;
+        this.guessCount = 0;
         this.setupEventListeners();
         this.updateDailyCountdown();
+        this.initializeArchipelago();
         console.log('GameApp initialized');
+    }
+
+    initializeArchipelago() {
+        this.archipelagoClient = new GameClient();
+        new ArchipelagoConnect(this);
+        
+        document.addEventListener('apDeathLink', () => {
+            this.handleDeathLink();
+        });
+    }
+
+    async connectToArchipelago(address, name, password) {
+        return await this.archipelagoClient.connect(address, name, password);
+    }
+
+    handleDeathLink() {
+        this.stopElapsedTimer();
+        document.getElementById('game-play').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('game-over-message').textContent = 'Game Over - Death Link Activated!';
+        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
     }
 
     setupEventListeners() {
@@ -385,10 +411,23 @@ class GameApp {
             alert('Invalid name, try again.');
             return;
         }
+
+        this.guessCount++;
+        
+        if (this.guessCount > 10 && this.archipelagoClient?.deathLink) {
+            this.archipelagoClient.sendDeathLink();
+            this.handleDeathLink();
+            return;
+        }
         
         if (guess === this.chosenCharacter.name) {
             const results = compareTraits(names[guess], this.chosenCharacter.traits);
             this.guessHistory.push(results);
+            
+            // Send hint based on difficulty
+            if (this.archipelagoClient?.connected) {
+                this.archipelagoClient.sendHint(this.chosenCharacter.traits[9]);
+            }
             
             this.stopElapsedTimer();
             document.getElementById('game-play').classList.add('hidden');
