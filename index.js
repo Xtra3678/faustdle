@@ -13,6 +13,16 @@ class GameApp {
         this.elapsedTimeInterval = null;
         this.archipelagoClient = null;
         this.guessCount = 0;
+        
+        // Initialize components after DOM is loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => this.initialize());
+        } else {
+            this.initialize();
+        }
+    }
+
+    initialize() {
         this.initializeArchipelago();
         this.setupEventListeners();
         this.updateDailyCountdown();
@@ -109,6 +119,44 @@ class GameApp {
         setInterval(updateTimer, 1000);
     }
 
+    startElapsedTimer() {
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+        }
+
+        this.startTime = Date.now();
+        const elapsedTimer = document.getElementById('elapsed-timer');
+        
+        const updateElapsedTime = () => {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            if (elapsedTimer) {
+                elapsedTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        };
+
+        updateElapsedTime(); // Update immediately
+        this.elapsedTimeInterval = setInterval(updateElapsedTime, 1000);
+    }
+
+    stopElapsedTimer() {
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+            this.elapsedTimeInterval = null;
+        }
+
+        if (this.startTime) {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            const finalTime = document.getElementById('final-time');
+            if (finalTime) {
+                finalTime.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+    }
+
     generateSeedForCharacter() {
         const characterInput = document.getElementById('character-input');
         const character = characterInput.value;
@@ -181,37 +229,6 @@ class GameApp {
                 autocompleteList.innerHTML = '';
             }
         });
-    }
-
-    startElapsedTimer() {
-        this.startTime = Date.now();
-        const elapsedTimer = document.getElementById('elapsed-timer');
-        
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-        }
-
-        this.elapsedTimeInterval = setInterval(() => {
-            const elapsed = Date.now() - this.startTime;
-            const minutes = Math.floor(elapsed / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            elapsedTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }, 1000);
-    }
-
-    stopElapsedTimer() {
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-            this.elapsedTimeInterval = null;
-        }
-
-        if (this.startTime) {
-            const elapsed = Date.now() - this.startTime;
-            const minutes = Math.floor(elapsed / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            document.getElementById('final-time').textContent = 
-                `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }
     }
 
     getDailySeed() {
@@ -481,7 +498,4 @@ class GameApp {
 }
 
 // Initialize the game when the DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM fully loaded and parsed');
-    new GameApp();
-});
+new GameApp();
