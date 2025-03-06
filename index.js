@@ -497,5 +497,5 @@ class GameApp {
     }
 }
 
-// Initialize the game when the DOM is loaded
+// Initialize the game
 new GameApp();
