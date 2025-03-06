@@ -13,9 +13,10 @@ class GameApp {
         this.elapsedTimeInterval = null;
         this.archipelagoClient = null;
         this.guessCount = 0;
+        this.initializeArchipelago();
         this.setupEventListeners();
         this.updateDailyCountdown();
-        this.initializeArchipelago();
+        this.setupAutocomplete();
         console.log('GameApp initialized');
     }
 
@@ -44,140 +45,45 @@ class GameApp {
         console.log('Setting up event listeners');
         
         // Game mode buttons
-        const normalModeButton = document.getElementById('normal-mode');
-        const hardModeButton = document.getElementById('hard-mode');
-        const fillerModeButton = document.getElementById('filler-mode');
-        const dailyModeButton = document.getElementById('daily-mode');
-        const seedStartButton = document.getElementById('seed-start');
-        const guessButton = document.getElementById('guess-button');
-        const skipButton = document.getElementById('skip-button');
-        const playAgainButton = document.getElementById('play-again');
-        const generateSeedButton = document.getElementById('generate-seed');
-        const generateSeedForCharacterButton = document.getElementById('generate-seed-for-character');
-        const useGeneratedSeedButton = document.getElementById('use-generated-seed');
-        const backToMainButton = document.getElementById('back-to-main');
+        document.getElementById('normal-mode')?.addEventListener('click', () => this.startGame('normal'));
+        document.getElementById('hard-mode')?.addEventListener('click', () => this.startGame('hard'));
+        document.getElementById('filler-mode')?.addEventListener('click', () => this.startGame('filler'));
+        document.getElementById('daily-mode')?.addEventListener('click', () => this.startDailyGame());
+        document.getElementById('seed-start')?.addEventListener('click', () => this.startGameWithSeed());
+        document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
+        document.getElementById('skip-button')?.addEventListener('click', () => this.skipGame());
+        document.getElementById('play-again')?.addEventListener('click', () => this.resetGame());
+        document.getElementById('generate-seed')?.addEventListener('click', () => {
+            document.getElementById('game-setup').classList.add('hidden');
+            document.getElementById('seed-generator').classList.remove('hidden');
+            this.setupCharacterAutocomplete();
+        });
+        document.getElementById('generate-seed-for-character')?.addEventListener('click', () => this.generateSeedForCharacter());
+        document.getElementById('use-generated-seed')?.addEventListener('click', () => {
+            const generatedSeed = document.getElementById('seed-result').textContent;
+            document.getElementById('seed-generator').classList.add('hidden');
+            document.getElementById('game-setup').classList.remove('hidden');
+            document.getElementById('seed-input').value = generatedSeed;
+        });
+        document.getElementById('back-to-main')?.addEventListener('click', () => {
+            document.getElementById('seed-generator').classList.add('hidden');
+            document.getElementById('game-setup').classList.remove('hidden');
+            document.getElementById('character-input').value = '';
+            document.getElementById('generated-seed').classList.add('hidden');
+        });
 
-        if (normalModeButton) {
-            normalModeButton.addEventListener('click', () => {
-                console.log('Normal mode button clicked');
-                this.startGame('normal');
-            });
-        }
+        // Setup input enter key handlers
+        document.getElementById('guess-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.makeGuess();
+        });
 
-        if (hardModeButton) {
-            hardModeButton.addEventListener('click', () => {
-                console.log('Hard mode button clicked');
-                this.startGame('hard');
-            });
-        }
+        document.getElementById('seed-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.startGameWithSeed();
+        });
 
-        if (fillerModeButton) {
-            fillerModeButton.addEventListener('click', () => {
-                console.log('Filler mode button clicked');
-                this.startGame('filler');
-            });
-        }
-
-        if (dailyModeButton) {
-            dailyModeButton.addEventListener('click', () => {
-                console.log('Daily mode button clicked');
-                this.startDailyGame();
-            });
-        }
-
-        if (generateSeedButton) {
-            generateSeedButton.addEventListener('click', () => {
-                console.log('Generate seed button clicked');
-                document.getElementById('game-setup').classList.add('hidden');
-                document.getElementById('seed-generator').classList.remove('hidden');
-                this.setupCharacterAutocomplete();
-            });
-        }
-
-        if (generateSeedForCharacterButton) {
-            generateSeedForCharacterButton.addEventListener('click', () => {
-                this.generateSeedForCharacter();
-            });
-        }
-
-        if (useGeneratedSeedButton) {
-            useGeneratedSeedButton.addEventListener('click', () => {
-                const generatedSeed = document.getElementById('seed-result').textContent;
-                document.getElementById('seed-generator').classList.add('hidden');
-                document.getElementById('game-setup').classList.remove('hidden');
-                document.getElementById('seed-input').value = generatedSeed;
-            });
-        }
-
-        if (backToMainButton) {
-            backToMainButton.addEventListener('click', () => {
-                document.getElementById('seed-generator').classList.add('hidden');
-                document.getElementById('game-setup').classList.remove('hidden');
-                document.getElementById('character-input').value = '';
-                document.getElementById('generated-seed').classList.add('hidden');
-            });
-        }
-
-        if (seedStartButton) {
-            seedStartButton.addEventListener('click', () => {
-                console.log('Seed start button clicked');
-                this.startGameWithSeed();
-            });
-        }
-
-        if (guessButton) {
-            guessButton.addEventListener('click', () => {
-                console.log('Guess button clicked');
-                this.makeGuess();
-            });
-        }
-
-        if (skipButton) {
-            skipButton.addEventListener('click', () => {
-                console.log('Skip button clicked');
-                this.skipGame();
-            });
-        }
-
-        if (playAgainButton) {
-            playAgainButton.addEventListener('click', () => {
-                console.log('Play again button clicked');
-                this.resetGame();
-            });
-        }
-
-        // Setup guess input enter key
-        const guessInput = document.getElementById('guess-input');
-        if (guessInput) {
-            guessInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    console.log('Enter key pressed in guess input');
-                    this.makeGuess();
-                }
-            });
-        }
-
-        // Setup seed input enter key
-        const seedInput = document.getElementById('seed-input');
-        if (seedInput) {
-            seedInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    console.log('Enter key pressed in seed input');
-                    this.startGameWithSeed();
-                }
-            });
-        }
-
-        // Setup character input enter key
-        const characterInput = document.getElementById('character-input');
-        if (characterInput) {
-            characterInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    console.log('Enter key pressed in character input');
-                    this.generateSeedForCharacter();
-                }
-            });
-        }
+        document.getElementById('character-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.generateSeedForCharacter();
+        });
     }
 
     updateDailyCountdown() {
@@ -195,12 +101,8 @@ class GameApp {
             const resultCountdownTimer = document.getElementById('result-countdown-timer');
             
             const timerText = `${hours}h ${minutes}m ${seconds}s`;
-            if (countdownTimer) {
-                countdownTimer.textContent = timerText;
-            }
-            if (resultCountdownTimer) {
-                resultCountdownTimer.textContent = timerText;
-            }
+            if (countdownTimer) countdownTimer.textContent = timerText;
+            if (resultCountdownTimer) resultCountdownTimer.textContent = timerText;
         };
 
         updateTimer();
@@ -216,7 +118,6 @@ class GameApp {
             return;
         }
 
-        // Generate a unique seed for this character
         const characterSeed = this.generateUniqueSeedForCharacter(character);
         
         document.getElementById('seed-result').textContent = characterSeed;
@@ -235,9 +136,7 @@ class GameApp {
             const index = Math.floor(Math.random() * characterNames.length);
             const selectedName = characterNames[index];
             
-            // Check if the selected character matches the desired character
             if (selectedName === character) {
-                // Verify that the character would actually be selectable in some mode
                 const difficulty = names[character][9];
                 if (difficulty === 'E' || difficulty === 'H' || difficulty === 'F') {
                     return seed;
@@ -339,9 +238,7 @@ class GameApp {
             return;
         }
 
-        // Easter egg: Check for "imu" seed
         if (seedInput.value.toLowerCase() === 'imu') {
-            // Reload the page
             window.location.reload();
             return;
         }
@@ -370,13 +267,13 @@ class GameApp {
         return [...this.guessHistory].reverse().map(guess => {
             return guess.map(result => {
                 if (result.match) {
-                    return '🟩'; // Green square emoji
+                    return '🟩';
                 } else if (result.direction === 'up') {
-                    return '⬆️'; // Up arrow emoji
+                    return '⬆️';
                 } else if (result.direction === 'down') {
-                    return '⬇️'; // Down arrow emoji
+                    return '⬇️';
                 } else {
-                    return '🟥'; // Red square emoji
+                    return '🟥';
                 }
             }).join('');
         }).join('\n');
@@ -424,7 +321,6 @@ class GameApp {
             const results = compareTraits(names[guess], this.chosenCharacter.traits);
             this.guessHistory.push(results);
             
-            // Send hint based on difficulty
             if (this.archipelagoClient?.connected) {
                 this.archipelagoClient.sendHint(this.chosenCharacter.traits[9]);
             }
@@ -435,7 +331,6 @@ class GameApp {
             document.getElementById('game-over-message').textContent = 'Congratulations! You found the correct character!';
             document.getElementById('correct-character').textContent = this.chosenCharacter.name;
             
-            // Only show seed if not in daily mode
             const gameSeedContainer = document.getElementById('game-seed-container');
             if (this.gameMode === 'daily') {
                 gameSeedContainer.classList.add('hidden');
@@ -446,7 +341,6 @@ class GameApp {
             
             document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
             
-            // Show daily countdown in results for daily mode
             if (this.gameMode === 'daily') {
                 document.getElementById('daily-result-countdown').classList.remove('hidden');
             }
@@ -490,7 +384,7 @@ class GameApp {
         let selectedName;
         let selectedTraits;
         let attempts = 0;
-        const maxAttempts = 1000; // Prevent infinite loop
+        const maxAttempts = 1000;
         
         do {
             const index = Math.floor(Math.random() * characterNames.length);
@@ -551,6 +445,8 @@ class GameApp {
 
     setupAutocomplete() {
         const guessInput = document.getElementById('guess-input');
+        if (!guessInput) return;
+
         const autocompleteList = document.createElement('ul');
         autocompleteList.className = 'autocomplete-list';
         guessInput.parentNode.appendChild(autocompleteList);
@@ -587,6 +483,5 @@ class GameApp {
 // Initialize the game when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM fully loaded and parsed');
-    const game = new GameApp();
-    game.setupAutocomplete();
+    new GameApp();
 });
