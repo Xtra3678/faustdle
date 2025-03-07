@@ -1,3 +1,5 @@
+// Import dependencies
+import { EventEmitter } from 'events';
 import { names, arcs, haki } from './data/characters.js';
 import { compareTraits } from './utils/gameLogic.js';
 import { APConnection } from './src/components/APConnection.js';
@@ -35,6 +37,15 @@ class GameApp {
             } else {
                 alert('Failed to connect to Archipelago. Please check your connection details.');
             }
+        });
+
+        // Listen for AP errors
+        apClient.on('connection_error', () => {
+            alert('Connection to Archipelago failed. The server might be unavailable.');
+        });
+
+        apClient.on('server_error', (error) => {
+            alert(`Archipelago server error: ${error.text || 'Unknown error'}`);
         });
     }
 
@@ -228,46 +239,59 @@ class GameApp {
     }
 
     generateSeedForCharacter() {
-        const characterInput = document.getElementById('character-input');
-        const character = characterInput.value;
-        
-        if (!names[character]) {
-            alert('Invalid character name, please try again.');
-            return;
-        }
+        try {
+            const characterInput = document.getElementById('character-input');
+            const character = characterInput.value;
+            
+            if (!names[character]) {
+                alert('Invalid character name, please try again.');
+                return;
+            }
 
-        // Generate a unique seed for this character
-        const characterSeed = this.generateUniqueSeedForCharacter(character);
-        
-        document.getElementById('seed-result').textContent = characterSeed;
-        document.getElementById('generated-seed').classList.remove('hidden');
+            // Generate a unique seed for this character
+            const characterSeed = this.generateUniqueSeedForCharacter(character);
+            
+            if (characterSeed) {
+                document.getElementById('seed-result').textContent = characterSeed;
+                document.getElementById('generated-seed').classList.remove('hidden');
+            } else {
+                alert('Could not generate a valid seed for this character. Please try a different character.');
+            }
+        } catch (error) {
+            console.warn('Error generating seed:', error);
+            alert('An error occurred while generating the seed. Please try again.');
+        }
     }
 
     generateUniqueSeedForCharacter(character) {
         let attempts = 0;
         const maxAttempts = 1000;
-        let seed;
         
-        do {
-            seed = Math.random().toString(36).substring(2, 15);
-            Math.seedrandom(seed);
-            const characterNames = Object.keys(names);
-            const index = Math.floor(Math.random() * characterNames.length);
-            const selectedName = characterNames[index];
-            
-            // Check if the selected character matches the desired character
-            if (selectedName === character) {
-                // Verify that the character would actually be selectable in some mode
-                const difficulty = names[character][9];
-                if (difficulty === 'E' || difficulty === 'H' || difficulty === 'F') {
-                    return seed;
+        while (attempts < maxAttempts) {
+            try {
+                const seed = Math.random().toString(36).substring(2, 15);
+                const rng = new Math.seedrandom(seed);
+                const characterNames = Object.keys(names);
+                const index = Math.floor(rng() * characterNames.length);
+                const selectedName = characterNames[index];
+                
+                // Check if the selected character matches the desired character
+                if (selectedName === character) {
+                    // Verify that the character would actually be selectable in some mode
+                    const difficulty = names[character][9];
+                    if (difficulty === 'E' || difficulty === 'H' || difficulty === 'F') {
+                        return seed;
+                    }
                 }
+                
+                attempts++;
+            } catch (error) {
+                console.warn('Error in seed generation attempt:', error);
+                attempts++;
             }
-            
-            attempts++;
-        } while (attempts < maxAttempts);
+        }
         
-        throw new Error('Could not generate a valid seed for the character');
+        return null;
     }
 
     setupCharacterAutocomplete() {
@@ -378,7 +402,7 @@ class GameApp {
     startGame(mode) {
         console.log('Starting game in mode:', mode);
         this.gameMode = mode;
-        this.currentSeed = Math.floor(Math.random() * 1000000).toString();
+        this.currentSeed = Math.random().toString(36).substring(2, 15);
         document.getElementById('game-setup').classList.add('hidden');
         document.getElementById('game-play').classList.remove('hidden');
         document.getElementById('skip-button').classList.remove('hidden');
@@ -497,28 +521,32 @@ class GameApp {
 
     selectRandomCharacter(mode, seed) {
         console.log('Selecting random character in mode:', mode);
-        Math.seedrandom(seed);
-        const characterNames = Object.keys(names);
-        let selectedName;
-        let selectedTraits;
-        let attempts = 0;
-        const maxAttempts = 1000; // Prevent infinite loop
-        
-        do {
-            const index = Math.floor(Math.random() * characterNames.length);
-            selectedName = characterNames[index];
-            selectedTraits = names[selectedName];
-            attempts++;
+        try {
+            const rng = new Math.seedrandom(seed);
+            const characterNames = Object.keys(names);
+            let selectedName;
+            let selectedTraits;
+            let attempts = 0;
+            const maxAttempts = 1000;
             
-            if (attempts >= maxAttempts) {
-                console.error('Could not find a valid character for the selected mode');
-                alert('Error: Could not find a valid character. Please try again.');
-                this.resetGame();
-                return null;
-            }
-        } while (!this.isValidCharacterForMode(selectedTraits[9], mode));
-        
-        return { name: selectedName, traits: selectedTraits };
+            do {
+                const index = Math.floor(rng() * characterNames.length);
+                selectedName = characterNames[index];
+                selectedTraits = names[selectedName];
+                attempts++;
+                
+                if (attempts >= maxAttempts) {
+                    throw new Error('Could not find a valid character for the selected mode');
+                }
+            } while (!this.isValidCharacterForMode(selectedTraits[9], mode));
+            
+            return { name: selectedName, traits: selectedTraits };
+        } catch (error) {
+            console.warn('Error selecting random character:', error);
+            alert('Error: Could not find a valid character. Please try again.');
+            this.resetGame();
+            return null;
+        }
     }
 
     isValidCharacterForMode(difficulty, mode) {

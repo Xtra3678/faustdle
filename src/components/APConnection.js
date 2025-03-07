@@ -46,6 +46,11 @@ export class APConnection {
     setupEventListeners() {
         document.getElementById('ap-connect').onclick = () => this.handleConnect();
         document.getElementById('ap-cancel').onclick = () => this.toggleConnectionDialog();
+
+        // Listen for successful connection to close dialog
+        document.addEventListener('ap-connected', () => {
+            this.toggleConnectionDialog();
+        });
     }
 
     toggleConnectionDialog() {
