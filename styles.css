@@ -365,6 +365,14 @@ tr:hover {
   background: #4338ca;
 }
 
+.btn-ap.connected {
+  background: #22c55e;
+}
+
+.btn-ap.connected:hover {
+  background: #16a34a;
+}
+
 .ap-dialog {
   position: fixed;
   top: 0;
@@ -400,6 +408,43 @@ tr:hover {
   display: flex;
   gap: 1rem;
   margin-top: 1.5rem;
+}
+
+.ap-status {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  display: none;
+}
+
+.ap-status.visible {
+  display: block;
+}
+
+.ap-status.info {
+  background-color: #e2e8f0;
+  color: #1e293b;
+}
+
+.ap-status.success {
+  background-color: #22c55e;
+  color: white;
+}
+
+.ap-status.error {
+  background-color: #ef4444;
+  color: white;
+}
+
+.ap-status.warning {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.ap-status .status-message {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
 }
 
 .ap-hints-container {

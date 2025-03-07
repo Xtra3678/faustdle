@@ -1,3 +1,5 @@
+import { apClient } from '../archipelago/client.js';
+
 export class APConnection {
     constructor(container) {
         this.container = container;
@@ -30,6 +32,9 @@ export class APConnection {
                 <div class="input-group">
                     <input type="password" id="ap-password" placeholder="Password (optional)">
                 </div>
+                <div id="ap-connection-status" class="ap-status hidden">
+                    <p class="status-message"></p>
+                </div>
                 <div class="ap-buttons">
                     <button id="ap-connect" class="btn">Connect</button>
                     <button id="ap-cancel" class="btn btn-secondary">Cancel</button>
@@ -47,16 +52,67 @@ export class APConnection {
         document.getElementById('ap-connect').onclick = () => this.handleConnect();
         document.getElementById('ap-cancel').onclick = () => this.toggleConnectionDialog();
 
-        // Listen for successful connection to close dialog
-        document.addEventListener('ap-connected', () => {
-            this.toggleConnectionDialog();
+        // Listen for connection events
+        apClient.on('connected', () => {
+            this.showStatus('Connected successfully!', 'success');
+            const connectButton = document.getElementById('ap-connect-button');
+            connectButton.textContent = 'Connected to AP';
+            connectButton.classList.add('connected');
+            setTimeout(() => {
+                this.toggleConnectionDialog();
+                connectButton.style.display = 'none';
+            }, 1500);
         });
+
+        apClient.on('connection_error', (errors) => {
+            const errorMessage = Array.isArray(errors) ? errors.join('\n') : 'Connection failed';
+            this.showStatus(errorMessage, 'error');
+        });
+
+        apClient.on('connection_status', (message) => {
+            this.showStatus(message, 'info');
+        });
+
+        apClient.on('server_error', (error) => {
+            const errorMessage = error.text || 'Server error occurred';
+            this.showStatus(errorMessage, 'error');
+        });
+
+        apClient.on('disconnected', () => {
+            const connectButton = document.getElementById('ap-connect-button');
+            connectButton.textContent = 'Connect to Archipelago';
+            connectButton.classList.remove('connected');
+            connectButton.style.display = 'block';
+            this.showStatus('Disconnected from server', 'warning');
+        });
+
+        apClient.on('server_message', (message) => {
+            this.showStatus(message, 'info');
+        });
+    }
+
+    showStatus(message, type = 'info') {
+        const statusContainer = document.getElementById('ap-connection-status');
+        const statusMessage = statusContainer.querySelector('.status-message');
+        
+        // Reset classes
+        statusContainer.className = 'ap-status';
+        
+        // Add new classes
+        statusContainer.classList.add(type, 'visible');
+        statusMessage.textContent = message;
     }
 
     toggleConnectionDialog() {
         const dialog = document.getElementById('ap-connection-dialog');
         this.visible = !this.visible;
         dialog.classList.toggle('hidden', !this.visible);
+        
+        if (!this.visible) {
+            // Clear status when closing
+            const statusContainer = document.getElementById('ap-connection-status');
+            statusContainer.className = 'ap-status hidden';
+        }
     }
 
     async handleConnect() {
@@ -65,7 +121,13 @@ export class APConnection {
         const slot = document.getElementById('ap-slot').value;
         const password = document.getElementById('ap-password').value;
 
-        // Emit custom event for connection
+        if (!slot) {
+            this.showStatus('Please enter a slot name', 'error');
+            return;
+        }
+
+        this.showStatus('Connecting...', 'info');
+        
         const event = new CustomEvent('ap-connect-request', {
             detail: { address, port, slot, password }
         });
