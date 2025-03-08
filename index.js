@@ -12,9 +12,15 @@ class GameApp {
         this.gameMode = null;
         this.startTime = null;
         this.elapsedTimeInterval = null;
-        this.setupEventListeners();
-        this.updateDailyCountdown();
+        
+        // Add death link event listener
+        document.addEventListener('death_link_triggered', (event) => {
+            this.handleDeathLink(`Death Link from ${event.detail.source}`);
+        });
+
         this.initializeAP();
+        this.updateDailyCountdown();
+        this.setupEventListeners();
         console.log('GameApp initialized');
     }
 
@@ -25,8 +31,8 @@ class GameApp {
         }
 
         document.addEventListener('ap-connect-request', async (event) => {
-            const { address, port, slot, password } = event.detail;
-            const success = await apClient.connect(address, port, slot, password);
+            const { address, port, slot, password, deathLink } = event.detail;
+            const success = await apClient.connect(address, port, slot, password, deathLink);
             
             if (success) {
                 alert('Connected to Archipelago!');
@@ -93,7 +99,7 @@ class GameApp {
             hints.forEach(hint => {
                 const hintElement = document.createElement('div');
                 hintElement.className = 'ap-hint';
-                if (hint.flags & 0x1) {
+                if (hint.flags > 0) {
                     hintElement.classList.add('progression');
                 }
                 hintElement.textContent = this.formatHint(hint);
@@ -124,178 +130,34 @@ class GameApp {
         return player?.name || 'Unknown Player';
     }
 
-    startGame(mode) {
-        console.log('Starting game in mode:', mode);
-        this.gameMode = mode;
-        this.currentSeed = Math.random().toString(36).substring(2, 15);
-        document.getElementById('game-setup').classList.add('hidden');
-        document.getElementById('game-play').classList.remove('hidden');
-        document.getElementById('skip-button').classList.remove('hidden');
-        this.chosenCharacter = this.selectRandomCharacter(mode, this.currentSeed);
-        this.startElapsedTimer();
-        
-        if (apClient.isConnected()) {
-            apClient.setGameMode(mode);
-        }
-    }
+    updateDailyCountdown() {
+        const updateTimer = () => {
+            const now = new Date();
+            const tomorrow = new Date(now);
+            tomorrow.setUTCHours(24, 0, 0, 0);
+            const timeLeft = tomorrow - now;
 
-    selectRandomCharacter(mode, seed) {
-        console.log('Selecting random character in mode:', mode);
-        try {
-            const rng = new Math.seedrandom(seed);
-            const characterNames = Object.keys(names);
-            let selectedName;
-            let selectedTraits;
-            let attempts = 0;
-            const maxAttempts = 1000;
+            const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+            const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+
+            const countdownTimer = document.getElementById('countdown-timer');
+            const resultCountdownTimer = document.getElementById('result-countdown-timer');
             
-            do {
-                const index = Math.floor(rng() * characterNames.length);
-                selectedName = characterNames[index];
-                selectedTraits = names[selectedName];
-                attempts++;
-                
-                if (attempts >= maxAttempts) {
-                    throw new Error('Could not find a valid character for the selected mode');
-                }
-            } while (!this.isValidCharacterForMode(selectedTraits[9], mode));
-            
-            return { name: selectedName, traits: selectedTraits };
-        } catch (error) {
-            console.warn('Error selecting random character:', error);
-            alert('Error: Could not find a valid character. Please try again.');
-            this.resetGame();
-            return null;
-        }
-    }
-
-    isValidCharacterForMode(difficulty, mode) {
-        switch(mode) {
-            case 'normal':
-                return difficulty === 'E';
-            case 'hard':
-                return difficulty === 'E' || difficulty === 'H';
-            case 'filler':
-                return true;
-            default:
-                return difficulty === 'E';
-        }
-    }
-
-    makeGuess() {
-        console.log('Making guess');
-        const guessInput = document.getElementById('guess-input');
-        const guess = guessInput.value;
-        
-        if (!names[guess]) {
-            alert('Invalid name, try again.');
-            return;
-        }
-        
-        const results = compareTraits(names[guess], this.chosenCharacter.traits);
-        this.guessHistory.push(results);
-        
-        if (apClient.isConnected()) {
-            apClient.submitGuess(guess, {
-                correct: guess === this.chosenCharacter.name,
-                matches: results.filter(r => r.match).length,
-                total: results.length
-            });
-        }
-
-        if (guess === this.chosenCharacter.name) {
-            this.handleCorrectGuess();
-        } else {
-            this.displayResultsUI(guess, results);
-            guessInput.value = '';
-        }
-    }
-
-    handleCorrectGuess() {
-        this.stopElapsedTimer();
-        document.getElementById('game-play').classList.add('hidden');
-        document.getElementById('game-over').classList.remove('hidden');
-        document.getElementById('game-over-message').textContent = 'Congratulations! You found the correct character!';
-        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
-        
-        const gameSeedContainer = document.getElementById('game-seed-container');
-        if (this.gameMode === 'daily') {
-            gameSeedContainer.classList.add('hidden');
-            document.getElementById('daily-result-countdown').classList.remove('hidden');
-        } else {
-            gameSeedContainer.classList.remove('hidden');
-            document.getElementById('game-seed').textContent = this.currentSeed;
-        }
-        
-        document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
-        this.copyResultsTable();
-    }
-
-    skipGame() {
-        if (!this.chosenCharacter || this.gameMode === 'daily') return;
-        
-        this.stopElapsedTimer();
-        document.getElementById('game-play').classList.add('hidden');
-        document.getElementById('game-over').classList.remove('hidden');
-        document.getElementById('game-over-message').textContent = 'Game skipped!';
-        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
-        document.getElementById('game-seed').textContent = this.currentSeed;
-        document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
-        this.copyResultsTable();
-    }
-
-    resetGame() {
-        console.log('Resetting game');
-        document.getElementById('game-over').classList.add('hidden');
-        document.getElementById('game-setup').classList.remove('hidden');
-        document.getElementById('seed-input').value = '';
-        document.getElementById('results-table').querySelector('tbody').innerHTML = '';
-        document.getElementById('results-table-final').querySelector('tbody').innerHTML = '';
-        document.getElementById('emoji-grid').textContent = '';
-        document.getElementById('elapsed-timer').textContent = '0:00';
-        document.getElementById('daily-result-countdown').classList.add('hidden');
-        document.getElementById('game-seed-container').classList.remove('hidden');
-        this.chosenCharacter = null;
-        this.currentSeed = null;
-        this.guessHistory = [];
-        this.gameMode = null;
-        this.startTime = null;
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-            this.elapsedTimeInterval = null;
-        }
-    }
-
-    displayResultsUI(guessName, results) {
-        console.log('Displaying results for guess', guessName);
-        const tbody = document.getElementById('results-table').querySelector('tbody');
-        const row = document.createElement('tr');
-        
-        const nameCell = document.createElement('td');
-        nameCell.textContent = guessName;
-        row.appendChild(nameCell);
-        
-        results.forEach(result => {
-            const cell = document.createElement('td');
-            cell.textContent = result.text;
-            
-            if (result.match) {
-                cell.classList.add('match');
-            } else if (result.direction) {
-                cell.classList.add('error', `hint-${result.direction}`);
-            } else {
-                cell.classList.add('error');
+            const timerText = `${hours}h ${minutes}m ${seconds}s`;
+            if (countdownTimer) {
+                countdownTimer.textContent = timerText;
             }
-            
-            row.appendChild(cell);
-        });
-        
-        tbody.insertBefore(row, tbody.firstChild);
+            if (resultCountdownTimer) {
+                resultCountdownTimer.textContent = timerText;
+            }
+        };
+
+        updateTimer();
+        setInterval(updateTimer, 1000);
     }
 
     setupEventListeners() {
-        console.log('Setting up event listeners');
-        
         // Game mode buttons
         const normalModeButton = document.getElementById('normal-mode');
         const hardModeButton = document.getElementById('hard-mode');
@@ -433,31 +295,168 @@ class GameApp {
         }
     }
 
-    updateDailyCountdown() {
-        const updateTimer = () => {
-            const now = new Date();
-            const tomorrow = new Date(now);
-            tomorrow.setUTCHours(24, 0, 0, 0);
-            const timeLeft = tomorrow - now;
+    makeGuess() {
+        console.log('Making guess');
+        const guessInput = document.getElementById('guess-input');
+        const guess = guessInput.value;
+        
+        if (!names[guess]) {
+            alert('Invalid name, try again.');
+            return;
+        }
+        
+        const results = compareTraits(names[guess], this.chosenCharacter.traits);
+        this.guessHistory.push(results);
+        
+        if (apClient.isConnected()) {
+            apClient.submitGuess(guess, {
+                correct: guess === this.chosenCharacter.name,
+                matches: results.filter(r => r.match).length,
+                total: results.length
+            });
 
-            const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-            const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+            // Check for death link condition (more than 8 guesses)
+            if (apClient.isDeathLinkEnabled() && this.guessHistory.length > 8) {
+                apClient.sendDeathLink('Too many guesses');
+                this.handleDeathLink('Too many guesses');
+                return;
+            }
+        }
 
-            const countdownTimer = document.getElementById('countdown-timer');
-            const resultCountdownTimer = document.getElementById('result-countdown-timer');
+        if (guess === this.chosenCharacter.name) {
+            this.handleCorrectGuess();
+        } else {
+            this.displayResultsUI(guess, results);
+            guessInput.value = '';
+        }
+    }
+
+    skipGame() {
+        if (!this.chosenCharacter || this.gameMode === 'daily') return;
+        
+        this.stopElapsedTimer();
+        document.getElementById('game-play').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('game-over-message').textContent = 'Game skipped!';
+        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
+        document.getElementById('game-seed').textContent = this.currentSeed;
+        document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
+        this.copyResultsTable();
+
+        // Send death link if enabled and skipped
+        if (apClient.isConnected() && apClient.isDeathLinkEnabled()) {
+            apClient.sendDeathLink('Skipped game');
+            this.handleDeathLink('Skipped game');
+        }
+    }
+
+    handleDeathLink(reason) {
+        this.stopElapsedTimer();
+        document.getElementById('game-play').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('game-over-message').textContent = `Game Over - Death Link: ${reason}`;
+        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
+        document.getElementById('game-seed').textContent = this.currentSeed;
+        document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
+        this.copyResultsTable();
+    }
+
+    startGame(mode) {
+        console.log('Starting game in mode:', mode);
+        this.gameMode = mode;
+        this.currentSeed = Math.random().toString(36).substring(2, 15);
+        document.getElementById('game-setup').classList.add('hidden');
+        document.getElementById('game-play').classList.remove('hidden');
+        document.getElementById('skip-button').classList.remove('hidden');
+        this.chosenCharacter = this.selectRandomCharacter(mode, this.currentSeed);
+        this.startElapsedTimer();
+        
+        if (apClient.isConnected()) {
+            apClient.setGameMode(mode);
+        }
+    }
+
+    selectRandomCharacter(mode, seed) {
+        console.log('Selecting random character in mode:', mode);
+        try {
+            const rng = new Math.seedrandom(seed);
+            const characterNames = Object.keys(names);
+            let selectedName;
+            let selectedTraits;
+            let attempts = 0;
+            const maxAttempts = 1000;
             
-            const timerText = `${hours}h ${minutes}m ${seconds}s`;
-            if (countdownTimer) {
-                countdownTimer.textContent = timerText;
-            }
-            if (resultCountdownTimer) {
-                resultCountdownTimer.textContent = timerText;
-            }
-        };
+            do {
+                const index = Math.floor(rng() * characterNames.length);
+                selectedName = characterNames[index];
+                selectedTraits = names[selectedName];
+                attempts++;
+                
+                if (attempts >= maxAttempts) {
+                    throw new Error('Could not find a valid character for the selected mode');
+                }
+            } while (!this.isValidCharacterForMode(selectedTraits[9], mode));
+            
+            return { name: selectedName, traits: selectedTraits };
+        } catch (error) {
+            console.warn('Error selecting random character:', error);
+            alert('Error: Could not find a valid character. Please try again.');
+            this.resetGame();
+            return null;
+        }
+    }
 
-        updateTimer();
-        setInterval(updateTimer, 1000);
+    isValidCharacterForMode(difficulty, mode) {
+        switch(mode) {
+            case 'normal':
+                return difficulty === 'E';
+            case 'hard':
+                return difficulty === 'E' || difficulty === 'H';
+            case 'filler':
+                return true;
+            default:
+                return difficulty === 'E';
+        }
+    }
+
+    startDailyGame() {
+        console.log('Starting daily game');
+        this.gameMode = 'daily';
+        this.currentSeed = this.getDailySeed();
+        document.getElementById('game-setup').classList.add('hidden');
+        document.getElementById('game-play').classList.remove('hidden');
+        document.getElementById('skip-button').classList.add('hidden');
+        this.chosenCharacter = this.selectRandomCharacter('normal', this.currentSeed);
+        this.startElapsedTimer();
+    }
+
+    getDailySeed() {
+        const date = new Date();
+        return `${date.getUTCFullYear()}-${date.getUTCMonth() + 1}-${date.getUTCDate()}`;
+    }
+
+    startGameWithSeed() {
+        console.log('Starting game with seed');
+        const seedInput = document.getElementById('seed-input');
+        if (!seedInput.value) {
+            alert('Please enter a seed value');
+            return;
+        }
+
+        // Easter egg: Check for "imu" seed
+        if (seedInput.value.toLowerCase() === 'imu') {
+            // Reload the page
+            window.location.reload();
+            return;
+        }
+
+        this.gameMode = 'filler';
+        this.currentSeed = seedInput.value;
+        document.getElementById('game-setup').classList.add('hidden');
+        document.getElementById('game-play').classList.remove('hidden');
+        document.getElementById('skip-button').classList.remove('hidden');
+        this.chosenCharacter = this.selectRandomCharacter('filler', this.currentSeed);
+        this.startElapsedTimer();
     }
 
     generateSeedForCharacter() {
@@ -550,100 +549,6 @@ class GameApp {
         });
     }
 
-    startElapsedTimer() {
-        this.startTime = Date.now();
-        const elapsedTimer = document.getElementById('elapsed-timer');
-        
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-        }
-
-        this.elapsedTimeInterval = setInterval(() => {
-            const elapsed = Date.now() - this.startTime;
-            const minutes = Math.floor(elapsed / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            elapsedTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }, 1000);
-    }
-
-    stopElapsedTimer() {
-        if (this.elapsedTimeInterval) {
-            clearInterval(this.elapsedTimeInterval);
-            this.elapsedTimeInterval = null;
-        }
-
-        if (this.startTime) {
-            const elapsed = Date.now() - this.startTime;
-            const minutes = Math.floor(elapsed / 60000);
-            const seconds = Math.floor((elapsed % 60000) / 1000);
-            document.getElementById('final-time').textContent = 
-                `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }
-    }
-
-    getDailySeed() {
-        const date = new Date();
-        return `${date.getUTCFullYear()}-${date.getUTCMonth() + 1}-${date.getUTCDate()}`;
-    }
-
-    startDailyGame() {
-        console.log('Starting daily game');
-        this.gameMode = 'daily';
-        this.currentSeed = this.getDailySeed();
-        document.getElementById('game-setup').classList.add('hidden');
-        document.getElementById('game-play').classList.remove('hidden');
-        document.getElementById('skip-button').classList.add('hidden');
-        this.chosenCharacter = this.selectRandomCharacter('normal', this.currentSeed);
-        this.startElapsedTimer();
-    }
-
-    startGameWithSeed() {
-        console.log('Starting game with seed');
-        const seedInput = document.getElementById('seed-input');
-        if (!seedInput.value) {
-            alert('Please enter a seed value');
-            return;
-        }
-
-        // Easter egg: Check for "imu" seed
-        if (seedInput.value.toLowerCase() === 'imu') {
-            // Reload the page
-            window.location.reload();
-            return;
-        }
-
-        this.gameMode = 'filler';
-        this.currentSeed = seedInput.value;
-        document.getElementById('game-setup').classList.add('hidden');
-        document.getElementById('game-play').classList.remove('hidden');
-        document.getElementById('skip-button').classList.remove('hidden');
-        this.chosenCharacter = this.selectRandomCharacter('filler', this.currentSeed);
-        this.startElapsedTimer();
-    }
-
-    generateEmojiGrid() {
-        return [...this.guessHistory].reverse().map(guess => {
-            return guess.map(result => {
-                if (result.match) {
-                    return '🟩'; // Green square emoji
-                } else if (result.direction === 'up') {
-                    return '⬆️'; // Up arrow emoji
-                } else if (result.direction === 'down') {
-                    return '⬇️'; // Down arrow emoji
-                } else {
-                    return '🟥'; // Red square emoji
-                }
-            }).join('');
-        }).join('\n');
-    }
-
-    copyResultsTable() {
-        const originalTable = document.getElementById('results-table');
-        const finalTable = document.getElementById('results-table-final');
-        const tbody = finalTable.querySelector('tbody');
-        tbody.innerHTML = originalTable.querySelector('tbody').innerHTML;
-    }
-
     setupAutocomplete() {
         const guessInput = document.getElementById('guess-input');
         const autocompleteList = document.createElement('ul');
@@ -676,6 +581,129 @@ class GameApp {
                 autocompleteList.innerHTML = '';
             }
         });
+    }
+
+    startElapsedTimer() {
+        this.startTime = Date.now();
+        const elapsedTimer = document.getElementById('elapsed-timer');
+        
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+        }
+
+        this.elapsedTimeInterval = setInterval(() => {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            elapsedTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    stopElapsedTimer() {
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+            this.elapsedTimeInterval = null;
+        }
+
+        if (this.startTime) {
+            const elapsed = Date.now() - this.startTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            document.getElementById('final-time').textContent = 
+                `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }
+
+    handleCorrectGuess() {
+        this.stopElapsedTimer();
+        document.getElementById('game-play').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('game-over-message').textContent = 'Congratulations! You found the correct character!';
+        document.getElementById('correct-character').textContent = this.chosenCharacter.name;
+        
+        const gameSeedContainer = document.getElementById('game-seed-container');
+        if (this.gameMode === 'daily') {
+            gameSeedContainer.classList.add('hidden');
+            document.getElementById('daily-result-countdown').classList.remove('hidden');
+        } else {
+            gameSeedContainer.classList.remove('hidden');
+            document.getElementById('game-seed').textContent = this.currentSeed;
+        }
+        
+        document.getElementById('emoji-grid').textContent = this.generateEmojiGrid();
+        this.copyResultsTable();
+    }
+
+    resetGame() {
+        console.log('Resetting game');
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('game-setup').classList.remove('hidden');
+        document.getElementById('seed-input').value = '';
+        document.getElementById('results-table').querySelector('tbody').innerHTML = '';
+        document.getElementById('results-table-final').querySelector('tbody').innerHTML = '';
+        document.getElementById('emoji-grid').textContent = '';
+        document.getElementById('elapsed-timer').textContent = '0:00';
+        document.getElementById('daily-result-countdown').classList.add('hidden');
+        document.getElementById('game-seed-container').classList.remove('hidden');
+        this.chosenCharacter = null;
+        this.currentSeed = null;
+        this.guessHistory = [];
+        this.gameMode = null;
+        this.startTime = null;
+        if (this.elapsedTimeInterval) {
+            clearInterval(this.elapsedTimeInterval);
+            this.elapsedTimeInterval = null;
+        }
+    }
+
+    displayResultsUI(guessName, results) {
+        console.log('Displaying results for guess', guessName);
+        const tbody = document.getElementById('results-table').querySelector('tbody');
+        const row = document.createElement('tr');
+        
+        const nameCell = document.createElement('td');
+        nameCell.textContent = guessName;
+        row.appendChild(nameCell);
+        
+        results.forEach(result => {
+            const cell = document.createElement('td');
+            cell.textContent = result.text;
+            
+            if (result.match) {
+                cell.classList.add('match');
+            } else if (result.direction) {
+                cell.classList.add('error', `hint-${result.direction}`);
+            } else {
+                cell.classList.add('error');
+            }
+            
+            row.appendChild(cell);
+        });
+        
+        tbody.insertBefore(row, tbody.firstChild);
+    }
+
+    generateEmojiGrid() {
+        return [...this.guessHistory].reverse().map(guess => {
+            return guess.map(result => {
+                if (result.match) {
+                    return '🟩'; // Green square emoji
+                } else if (result.direction === 'up') {
+                    return '⬆️'; // Up arrow emoji
+                } else if (result.direction === 'down') {
+                    return '⬇️'; // Down arrow emoji
+                } else {
+                    return '🟥'; // Red square emoji
+                }
+            }).join('');
+        }).join('\n');
+    }
+
+    copyResultsTable() {
+        const originalTable = document.getElementById('results-table');
+        const finalTable = document.getElementById('results-table-final');
+        const tbody = finalTable.querySelector('tbody');
+        tbody.innerHTML = originalTable.querySelector('tbody').innerHTML;
     }
 }
 

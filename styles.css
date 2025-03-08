@@ -353,11 +353,7 @@ tr:hover {
 }
 
 .btn-ap {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
   background: #4f46e5;
-  z-index: 1000;
   margin-left: 1rem;
 }
 
@@ -465,6 +461,13 @@ tr:hover {
 
 .ap-hint.progression {
   background: #059669;
+}
+
+.button-group {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1rem;
 }
 
 @keyframes fadeIn {
