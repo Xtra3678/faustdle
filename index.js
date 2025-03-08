@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import seedrandom from 'seedrandom';
 import { names, arcs, haki } from './data/characters.js';
 import { compareTraits } from './utils/gameLogic.js';
 import { APConnection } from './src/components/APConnection.js';
@@ -379,7 +380,7 @@ class GameApp {
     selectRandomCharacter(mode, seed) {
         console.log('Selecting random character in mode:', mode);
         try {
-            const rng = new Math.seedrandom(seed);
+            const rng = new seedrandom(seed);
             const characterNames = Object.keys(names);
             let selectedName;
             let selectedTraits;
@@ -491,7 +492,7 @@ class GameApp {
         while (attempts < maxAttempts) {
             try {
                 const seed = Math.random().toString(36).substring(2, 15);
-                const rng = new Math.seedrandom(seed);
+                const rng = new seedrandom(seed);
                 const characterNames = Object.keys(names);
                 const index = Math.floor(rng() * characterNames.length);
                 const selectedName = characterNames[index];
@@ -642,7 +643,7 @@ class GameApp {
         document.getElementById('results-table').querySelector('tbody').innerHTML = '';
         document.getElementById('results-table-final').querySelector('tbody').innerHTML = '';
         document.getElementById('emoji-grid').textContent = '';
-        document.getElementById('elapsed-timer').textContent = '0:00';
+        document.getElementById('elapse d-timer').textContent = '0:00';
         document.getElementById('daily-result-countdown').classList.add('hidden');
         document.getElementById('game-seed-container').classList.remove('hidden');
         this.chosenCharacter = null;
