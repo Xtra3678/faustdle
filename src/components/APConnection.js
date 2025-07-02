@@ -22,13 +22,6 @@ export class APConnection {
      * Includes connection dialog, buttons, and hints container
      */
     createUI() {
-        // Create Other button
-        const otherButton = document.createElement('button');
-        otherButton.id = 'other-toggle';
-        otherButton.className = 'btn btn-other';
-        otherButton.textContent = 'Other';
-        otherButton.onclick = () => this.toggleOtherDialog();
-
         // Create main connection toggle button (now in Other dialog)
         const connectButton = document.createElement('button');
         connectButton.id = 'archipelago-toggle';
@@ -37,23 +30,6 @@ export class APConnection {
         connectButton.onclick = () => this.toggleConnectionDialog();
 
         // Create test hint button (hidden by default)
-        
-        // Create Other dialog
-        const otherDialog = document.createElement('div');
-        otherDialog.id = 'other-dialog';
-        otherDialog.className = 'other-dialog hidden';
-        otherDialog.innerHTML = `
-            <div class="other-dialog-content">
-                <h3>Other Options</h3>
-                <div class="other-buttons">
-                    <button id="faq-button" class="btn btn-faq">FAQ</button>
-                    <button id="ap-connect-button" class="btn btn-ap">Connect to Archipelago</button>
-                    <button id="generate-seed" class="btn btn-generate">Obtain seed for character</button>
-                    <a href="https://discord.gg/339W2PB4gD" target="_blank" class="btn btn-discord">Join our Discord</a>
-                    <button id="other-cancel" class="btn btn-secondary">Back</button>
-                </div>
-            </div>
-        `;
         
         // Create connection dialog
         const dialog = document.createElement('div');
@@ -96,20 +72,7 @@ export class APConnection {
         hintsContainer.className = 'ap-hints-container';
         hintsContainer.style.display = 'none';
 
-        // Find or create the button container
-        const seedGenerator = document.querySelector('.seed-generator');
-        if (seedGenerator) {
-            let buttonGroup = seedGenerator.querySelector('.button-group');
-            if (!buttonGroup) {
-                buttonGroup = document.createElement('div');
-                buttonGroup.className = 'button-group';
-                seedGenerator.appendChild(buttonGroup);
-            }
-            buttonGroup.appendChild(otherButton);
-        }
-
         this.container.appendChild(dialog);
-        this.container.appendChild(otherDialog);
         this.container.appendChild(hintsContainer);
     }
 
@@ -168,10 +131,6 @@ export class APConnection {
         // AP client event handlers
         apClient.on('connected', () => {
             this.showStatus('Connected successfully!', 'success');
-            const otherButton = document.getElementById('other-toggle');
-            if (otherButton) {
-                otherButton.style.display = 'none';
-            }
             setTimeout(() => {
                 this.toggleConnectionDialog();
             }, 1500);
@@ -192,11 +151,7 @@ export class APConnection {
         });
 
         apClient.on('disconnected', () => {
-            const otherButton = document.getElementById('other-toggle');
             const hintsContainer = document.getElementById('ap-hints-container');
-            if (otherButton) {
-                otherButton.style.display = 'block';
-            }
             if (hintsContainer) {
                 hintsContainer.style.display = 'none';
             }

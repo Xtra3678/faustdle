@@ -117,13 +117,15 @@ export default class GameApp {
                 console.log('Hidden archipelago button in Discord environment');
             }
             
-            // If buttons weren't found, try again in a bit
-            if (!leaderboardButton || !apConnectButton) {
+            // If buttons weren't found, try again in a bit (but don't retry indefinitely)
+            if ((!leaderboardButton || !apConnectButton) && this.hideButtonsRetryCount < 10) {
+                this.hideButtonsRetryCount = (this.hideButtonsRetryCount || 0) + 1;
                 setTimeout(hideButtons, 200);
             }
         };
         
         // Start trying to hide buttons immediately and retry if needed
+        this.hideButtonsRetryCount = 0;
         setTimeout(hideButtons, 100);
     }
 
