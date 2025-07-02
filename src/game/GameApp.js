@@ -91,7 +91,7 @@ export default class GameApp {
             // Set flag to disable streak saving and daily player count
             this.isInDiscord = true;
             
-            // Hide specific buttons from the Other menu after it's created
+            // Hide specific buttons from the Other menu after they're created
             this.hideDiscordIncompatibleButtons();
         } else {
             this.isInDiscord = false;
@@ -102,20 +102,29 @@ export default class GameApp {
      * Hide Discord-incompatible buttons from the Other menu
      */
     hideDiscordIncompatibleButtons() {
-        // Wait for DOM to be ready, then hide the buttons
-        setTimeout(() => {
+        // Use a longer timeout and retry mechanism to ensure buttons are hidden
+        const hideButtons = () => {
             const leaderboardButton = document.getElementById('leaderboard-button');
+            const apConnectButton = document.getElementById('ap-connect-button');
+            
             if (leaderboardButton) {
                 leaderboardButton.style.display = 'none';
                 console.log('Hidden leaderboard button in Discord environment');
             }
             
-            const apConnectButton = document.getElementById('ap-connect-button');
             if (apConnectButton) {
                 apConnectButton.style.display = 'none';
                 console.log('Hidden archipelago button in Discord environment');
             }
-        }, 100);
+            
+            // If buttons weren't found, try again in a bit
+            if (!leaderboardButton || !apConnectButton) {
+                setTimeout(hideButtons, 200);
+            }
+        };
+        
+        // Start trying to hide buttons immediately and retry if needed
+        setTimeout(hideButtons, 100);
     }
 
     /**
@@ -425,7 +434,7 @@ export default class GameApp {
 
         const otherButtons = document.querySelector('.other-buttons');
         
-        // Always add leaderboard button, but hide it later if in Discord
+        // Always add leaderboard button (will be hidden later if in Discord)
         const leaderboardButton = document.createElement('button');
         leaderboardButton.id = 'leaderboard-button';
         leaderboardButton.className = 'btn btn-leaderboard';
