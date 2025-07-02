@@ -56,6 +56,9 @@ export default class GameApp {
                 // Update Supabase client to use proxy
                 this.setupSupabaseProxy();
             }
+            
+            // Hide Discord-incompatible features if in Discord environment
+            this.handleDiscordEnvironment();
         }).catch(console.error);
         
         // Listen for Discord auth changes
@@ -76,6 +79,32 @@ export default class GameApp {
         this.setupAutocomplete();
         this.initializeMusic();
         console.log('GameApp initialized');
+    }
+
+    /**
+     * Handle Discord environment by hiding incompatible features
+     */
+    handleDiscordEnvironment() {
+        if (this.discord.isInDiscordEnvironment()) {
+            console.log('Discord environment detected, hiding incompatible features');
+            
+            // Hide leaderboard button
+            const leaderboardButton = document.getElementById('leaderboard-button');
+            if (leaderboardButton) {
+                leaderboardButton.style.display = 'none';
+            }
+            
+            // Hide archipelago button
+            const apConnectButton = document.getElementById('ap-connect-button');
+            if (apConnectButton) {
+                apConnectButton.style.display = 'none';
+            }
+            
+            // Set flag to disable streak saving and daily player count
+            this.isInDiscord = true;
+        } else {
+            this.isInDiscord = false;
+        }
     }
 
     /**
@@ -384,17 +413,21 @@ export default class GameApp {
         const streakModeButton = document.getElementById('streak-mode');
 
         const otherButtons = document.querySelector('.other-buttons');
-        const leaderboardButton = document.createElement('button');
-        leaderboardButton.id = 'leaderboard-button';
-        leaderboardButton.className = 'btn btn-leaderboard';
-        leaderboardButton.textContent = 'Leaderboard';
-        leaderboardButton.addEventListener('click', () => {
-            document.getElementById('other-dialog').classList.add('hidden');
-            const leaderboardDialog = document.getElementById('leaderboard-dialog');
-            leaderboardDialog.classList.remove('hidden');
-            this.leaderboardManager.loadLeaderboard('normal');
-        });
-        otherButtons.insertBefore(leaderboardButton, otherButtons.querySelector('#other-cancel'));
+        
+        // Only add leaderboard button if not in Discord environment
+        if (!this.discord.isInDiscordEnvironment()) {
+            const leaderboardButton = document.createElement('button');
+            leaderboardButton.id = 'leaderboard-button';
+            leaderboardButton.className = 'btn btn-leaderboard';
+            leaderboardButton.textContent = 'Leaderboard';
+            leaderboardButton.addEventListener('click', () => {
+                document.getElementById('other-dialog').classList.add('hidden');
+                const leaderboardDialog = document.getElementById('leaderboard-dialog');
+                leaderboardDialog.classList.remove('hidden');
+                this.leaderboardManager.loadLeaderboard('normal');
+            });
+            otherButtons.insertBefore(leaderboardButton, otherButtons.querySelector('#other-cancel'));
+        }
 
         if (normalModeButton) {
             normalModeButton.addEventListener('click', () => this.startGame('normal'));
@@ -514,6 +547,12 @@ export default class GameApp {
     }
 
     initializeAP() {
+        // Only initialize AP if not in Discord environment
+        if (this.discord.isInDiscordEnvironment()) {
+            console.log('Skipping AP initialization in Discord environment');
+            return;
+        }
+
         const seedGenerator = document.querySelector('.seed-generator');
         if (seedGenerator) {
             new APConnection(seedGenerator);
@@ -747,51 +786,50 @@ export default class GameApp {
                 inProgress: false
             });
             
-            try {
-                // Use authenticated call if possible, fallback to RPC
-                if (this.isDiscordAuthenticated) {
-                    await this.supabase.rpc('increment_daily_players', {
-                        challenge_date: today
-                    });
-                } else {
-                    // For unauthenticated users, still try the RPC call
-                    await this.supabase.rpc('increment_daily_players', {
-                        challenge_date: today
-                    });
+            // Only try to update daily player count if not in Discord environment
+            if (!this.isInDiscord) {
+                try {
+                    // Use authenticated call if possible, fallback to RPC
+                    if (this.isDiscordAuthenticated) {
+                        await this.supabase.rpc('increment_daily_players', {
+                            challenge_date: today
+                        });
+                    } else {
+                        // For unauthenticated users, still try the RPC call
+                        await this.supabase.rpc('increment_daily_players', {
+                            challenge_date: today
+                        });
+                    }
+
+                    const { data } = await this.supabase
+                        .from('daily_players')
+                        .select('player_count')
+                        .eq('date', today)
+                        .single();
+
+                    if (data) {
+                        this.currentDailyCount = data.player_count;
+                    }
+                } catch (error) {
+                    console.error('Error updating daily player count:', error);
                 }
+            }
 
-                const { data } = await this.supabase
-                    .from('daily_players')
-                    .select('player_count')
-                    .eq('date', today)
-                    .single();
+            this.ui.showGameOver(
+                `Congratulations! You completed Daily Challenge #${dailyNumber}!`,
+                this.chosenCharacter.name,
+                null,
+                false,
+                0,
+                completionTime,
+                null,
+                null,
+                this.isInDiscord // Pass Discord flag to hide player count
+            );
 
-                if (data) {
-                    this.currentDailyCount = data.player_count;
-                }
-
-                this.ui.showGameOver(
-                    `Congratulations! You completed Daily Challenge #${dailyNumber}!`,
-                    this.chosenCharacter.name,
-                    null,
-                    false,
-                    0,
-                    completionTime
-                );
-
-                if (this.currentDailyCount) {
-                    this.ui.updateDailyPlayerCount(this.currentDailyCount);
-                }
-            } catch (error) {
-                console.error('Error updating daily player count:', error);
-                this.ui.showGameOver(
-                    `Congratulations! You completed Daily Challenge #${dailyNumber}!`,
-                    this.chosenCharacter.name,
-                    null,
-                    false,
-                    0,
-                    completionTime
-                );
+            // Only show daily player count if not in Discord and we have the count
+            if (!this.isInDiscord && this.currentDailyCount) {
+                this.ui.updateDailyPlayerCount(this.currentDailyCount);
             }
         } else if (this.isStreakMode) {
             this.streakCount++;
@@ -803,13 +841,20 @@ export default class GameApp {
                 this.streakCount,
                 null,
                 this.currentRoundPoints, // Pass round points
-                this.streakPoints // Pass total points
+                this.streakPoints, // Pass total points
+                this.isInDiscord // Pass Discord flag
             );
         } else {
             this.ui.showGameOver(
                 'Congratulations! You found the correct character!',
                 this.chosenCharacter.name,
-                this.currentSeed
+                this.currentSeed,
+                false,
+                0,
+                null,
+                null,
+                null,
+                this.isInDiscord // Pass Discord flag
             );
         }
         
@@ -830,12 +875,14 @@ export default class GameApp {
             finalStreak,
             null,
             0, // No round points for loss
-            finalPoints // Final total points
+            finalPoints, // Final total points
+            this.isInDiscord // Pass Discord flag
         );
         document.getElementById('emoji-grid').textContent = this.results.generateEmojiGrid(this.guessHistory.map(g => g.results));
         this.results.copyResultsTable();
 
-        if (finalStreak > 0) {
+        // Only show name prompt for leaderboard if not in Discord environment and streak > 0
+        if (!this.isInDiscord && finalStreak > 0) {
             this.leaderboardManager.showNamePrompt(finalStreak, this.selectedStreakMode, finalPoints);
         }
 
@@ -1004,27 +1051,32 @@ export default class GameApp {
                 null,
                 false,
                 0,
-                cache.completionTime
+                cache.completionTime,
+                null,
+                null,
+                this.isInDiscord // Pass Discord flag
             );
             
             this.guessHistory = cache.guessHistory;
             document.getElementById('emoji-grid').textContent = this.results.generateEmojiGrid(this.guessHistory.map(g => g.results));
             this.results.displayCachedResults(cache.guessHistory);
             
-            // Get current player count from database
-            try {
-                const today = new Date().toISOString().split('T')[0];
-                const { data } = await this.supabase
-                    .from('daily_players')
-                    .select('player_count')
-                    .eq('date', today)
-                    .single();
+            // Only get current player count from database if not in Discord environment
+            if (!this.isInDiscord) {
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const { data } = await this.supabase
+                        .from('daily_players')
+                        .select('player_count')
+                        .eq('date', today)
+                        .single();
 
-                if (data) {
-                    this.ui.updateDailyPlayerCount(data.player_count);
+                    if (data) {
+                        this.ui.updateDailyPlayerCount(data.player_count);
+                    }
+                } catch (error) {
+                    console.error('Error fetching daily player count:', error);
                 }
-            } catch (error) {
-                console.error('Error fetching daily player count:', error);
             }
             
             return;
@@ -1051,15 +1103,22 @@ export default class GameApp {
                 completed: false
             });
 
-            const today = new Date().toISOString().split('T')[0];
-            const { data } = await this.supabase
-                .from('daily_players')
-                .select('player_count')
-                .eq('date', today)
-                .single();
+            // Only get current player count if not in Discord environment
+            if (!this.isInDiscord) {
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const { data } = await this.supabase
+                        .from('daily_players')
+                        .select('player_count')
+                        .eq('date', today)
+                        .single();
 
-            if (data) {
-                this.currentDailyCount = data.player_count;
+                    if (data) {
+                        this.currentDailyCount = data.player_count;
+                    }
+                } catch (error) {
+                    console.error('Error fetching daily player count:', error);
+                }
             }
         } catch (error) {
             console.error('Error starting daily game:', error);

@@ -36,6 +36,13 @@ export class DiscordManager {
         return isDiscordDomain || (hasDiscordParent && hasFrameId) || (hasDiscordUserAgent && hasFrameId);
     }
 
+    /**
+     * Check if we're in Discord environment (public method for other components)
+     */
+    isInDiscordEnvironment() {
+        return this.isDiscordActivity;
+    }
+
     async initialize(supabase) {
         try {
             // Add Discord embed meta tags

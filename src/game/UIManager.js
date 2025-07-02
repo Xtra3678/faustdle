@@ -83,7 +83,7 @@ export class UIManager {
         }
     }
 
-    showGameOver(message, character, seed, isStreak = false, streakCount = 0, completionTime = null, roundPoints = null, totalPoints = null) {
+    showGameOver(message, character, seed, isStreak = false, streakCount = 0, completionTime = null, roundPoints = null, totalPoints = null, isInDiscord = false) {
         const gamePlay = document.getElementById('game-play');
         const gameOver = document.getElementById('game-over');
         const gameOverMessage = document.getElementById('game-over-message');
