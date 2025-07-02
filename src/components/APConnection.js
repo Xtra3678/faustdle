@@ -16,7 +16,7 @@ export class APConnection {
         this.setupHintsDisplay();
         this.setupEventListeners();
     }
-
+ 
     /**
      * Creates and initializes all UI elements for AP connection
      * Includes connection dialog, buttons, and hints container
