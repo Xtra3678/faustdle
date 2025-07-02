@@ -88,23 +88,34 @@ export default class GameApp {
         if (this.discord.isInDiscordEnvironment()) {
             console.log('Discord environment detected, hiding incompatible features');
             
-            // Hide leaderboard button
-            const leaderboardButton = document.getElementById('leaderboard-button');
-            if (leaderboardButton) {
-                leaderboardButton.style.display = 'none';
-            }
-            
-            // Hide archipelago button
-            const apConnectButton = document.getElementById('ap-connect-button');
-            if (apConnectButton) {
-                apConnectButton.style.display = 'none';
-            }
-            
             // Set flag to disable streak saving and daily player count
             this.isInDiscord = true;
+            
+            // Hide specific buttons from the Other menu after it's created
+            this.hideDiscordIncompatibleButtons();
         } else {
             this.isInDiscord = false;
         }
+    }
+
+    /**
+     * Hide Discord-incompatible buttons from the Other menu
+     */
+    hideDiscordIncompatibleButtons() {
+        // Wait for DOM to be ready, then hide the buttons
+        setTimeout(() => {
+            const leaderboardButton = document.getElementById('leaderboard-button');
+            if (leaderboardButton) {
+                leaderboardButton.style.display = 'none';
+                console.log('Hidden leaderboard button in Discord environment');
+            }
+            
+            const apConnectButton = document.getElementById('ap-connect-button');
+            if (apConnectButton) {
+                apConnectButton.style.display = 'none';
+                console.log('Hidden archipelago button in Discord environment');
+            }
+        }, 100);
     }
 
     /**
@@ -414,20 +425,18 @@ export default class GameApp {
 
         const otherButtons = document.querySelector('.other-buttons');
         
-        // Only add leaderboard button if not in Discord environment
-        if (!this.discord.isInDiscordEnvironment()) {
-            const leaderboardButton = document.createElement('button');
-            leaderboardButton.id = 'leaderboard-button';
-            leaderboardButton.className = 'btn btn-leaderboard';
-            leaderboardButton.textContent = 'Leaderboard';
-            leaderboardButton.addEventListener('click', () => {
-                document.getElementById('other-dialog').classList.add('hidden');
-                const leaderboardDialog = document.getElementById('leaderboard-dialog');
-                leaderboardDialog.classList.remove('hidden');
-                this.leaderboardManager.loadLeaderboard('normal');
-            });
-            otherButtons.insertBefore(leaderboardButton, otherButtons.querySelector('#other-cancel'));
-        }
+        // Always add leaderboard button, but hide it later if in Discord
+        const leaderboardButton = document.createElement('button');
+        leaderboardButton.id = 'leaderboard-button';
+        leaderboardButton.className = 'btn btn-leaderboard';
+        leaderboardButton.textContent = 'Leaderboard';
+        leaderboardButton.addEventListener('click', () => {
+            document.getElementById('other-dialog').classList.add('hidden');
+            const leaderboardDialog = document.getElementById('leaderboard-dialog');
+            leaderboardDialog.classList.remove('hidden');
+            this.leaderboardManager.loadLeaderboard('normal');
+        });
+        otherButtons.insertBefore(leaderboardButton, otherButtons.querySelector('#other-cancel'));
 
         if (normalModeButton) {
             normalModeButton.addEventListener('click', () => this.startGame('normal'));
