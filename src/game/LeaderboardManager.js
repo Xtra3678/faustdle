@@ -11,6 +11,8 @@ export class LeaderboardManager {
         this.supabase = supabase;
         this.currentPage = 0;         // Current page in pagination
         this.entriesPerPage = 50;     // Number of entries to display per page
+        this.currentMode = 'standard'; // Track current mode
+        this.currentDifficulty = 'normal'; // Track current difficulty
     }
 
     /**
@@ -25,9 +27,13 @@ export class LeaderboardManager {
             <div class="leaderboard-content">
                 <h3>Leaderboard</h3>
                 <div class="mode-selector">
-                    <button class="btn mode-select active" data-mode="normal">Normal</button>
-                    <button class="btn btn-hard mode-select" data-mode="hard">Hard</button>
-                    <button class="btn btn-filler mode-select" data-mode="filler">Filler</button>
+                    <button class="btn btn-standard mode-select" data-mode="standard">Standard</button>
+                    <button class="btn btn-scramble mode-select" data-mode="scramble">Scramble</button>
+                </div>
+                <div id="difficulty-selector" class="mode-selector" style="margin-top: 1rem;">
+                    <button class="btn difficulty-select active" data-difficulty="normal">Normal</button>
+                    <button class="btn btn-hard difficulty-select" data-difficulty="hard">Hard</button>
+                    <button class="btn btn-filler difficulty-select" data-difficulty="filler">Filler</button>
                 </div>
                 <div class="leaderboard-table">
                     <table>
@@ -62,13 +68,40 @@ export class LeaderboardManager {
     setupLeaderboardEvents() {
         const dialog = document.getElementById('leaderboard-dialog');
         
-        // Mode selection
+        // Main mode selection (Standard vs Scramble)
         dialog.querySelectorAll('.mode-select').forEach(button => {
             button.addEventListener('click', () => {
                 dialog.querySelectorAll('.mode-select').forEach(b => b.classList.remove('active'));
                 button.classList.add('active');
                 this.currentPage = 0;
-                this.loadLeaderboard(button.dataset.mode);
+                
+                const mode = button.dataset.mode;
+                this.currentMode = mode;
+                
+                // Reset to normal difficulty when switching modes
+                this.currentDifficulty = 'normal';
+                
+                // Update difficulty selector buttons
+                const difficultyButtons = dialog.querySelectorAll('.difficulty-select');
+                difficultyButtons.forEach(b => b.classList.remove('active'));
+                const normalButton = dialog.querySelector('.difficulty-select[data-difficulty="normal"]');
+                if (normalButton) {
+                    normalButton.classList.add('active');
+                }
+                
+                this.loadLeaderboard();
+            });
+        });
+
+        // Difficulty selection
+        dialog.querySelectorAll('.difficulty-select').forEach(button => {
+            button.addEventListener('click', () => {
+                dialog.querySelectorAll('.difficulty-select').forEach(b => b.classList.remove('active'));
+                button.classList.add('active');
+                this.currentPage = 0;
+                
+                this.currentDifficulty = button.dataset.difficulty;
+                this.loadLeaderboard();
             });
         });
 
@@ -76,15 +109,13 @@ export class LeaderboardManager {
         dialog.querySelector('.prev-page').addEventListener('click', () => {
             if (this.currentPage > 0) {
                 this.currentPage--;
-                const activeMode = dialog.querySelector('.mode-select.active').dataset.mode;
-                this.loadLeaderboard(activeMode);
+                this.loadLeaderboard();
             }
         });
 
         dialog.querySelector('.next-page').addEventListener('click', () => {
             this.currentPage++;
-            const activeMode = dialog.querySelector('.mode-select.active').dataset.mode;
-            this.loadLeaderboard(activeMode);
+            this.loadLeaderboard();
         });
 
         // Close button
@@ -94,11 +125,10 @@ export class LeaderboardManager {
     }
 
     /**
-     * Loads and displays leaderboard entries for the specified mode.
+     * Loads and displays leaderboard entries for the current mode and difficulty.
      * Handles pagination and updates the UI with retrieved data.
-     * @param {string} mode - Game mode to display scores for
      */
-    async loadLeaderboard(mode) {
+    async loadLeaderboard() {
         const dialog = document.getElementById('leaderboard-dialog');
         const tbody = dialog.querySelector('tbody');
         const prevButton = dialog.querySelector('.prev-page');
@@ -106,17 +136,28 @@ export class LeaderboardManager {
         const pageInfo = dialog.querySelector('.page-info');
 
         try {
-            // Get total count first
+            let modeFilter;
+            
+            // Determine the database mode filter based on current selection
+            if (this.currentMode === 'scramble') {
+                // For scramble mode, we store entries with mode = 'scramble_difficulty'
+                modeFilter = `scramble_${this.currentDifficulty}`;
+            } else {
+                // For standard modes, mode = difficulty name directly
+                modeFilter = this.currentDifficulty;
+            }
+
+            // Get total count
             const { count } = await this.supabase
                 .from('leaderboard_entries')
                 .select('id', { count: 'exact', head: true })
-                .eq('mode', mode);
+                .eq('mode', modeFilter);
 
-            // Then get paginated data, ordered by streak first, then points
+            // Get paginated data, ordered by streak first, then points
             const { data: entries, error } = await this.supabase
                 .from('leaderboard_entries')
                 .select('*')
-                .eq('mode', mode)
+                .eq('mode', modeFilter)
                 .order('streak', { ascending: false })
                 .order('points', { ascending: false, nullsLast: true })
                 .range(this.currentPage * this.entriesPerPage, 
@@ -131,18 +172,22 @@ export class LeaderboardManager {
 
             // Clear and populate table
             tbody.innerHTML = '';
-            entries.forEach((entry, index) => {
-                const rank = this.currentPage * this.entriesPerPage + index + 1;
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${rank}</td>
-                    <td>${entry.player_name}</td>
-                    <td>${entry.streak}</td>
-                    <td>${entry.points !== null ? entry.points : 'N/A'}</td>
-                    <td>${new Date(entry.created_at).toLocaleDateString()}</td>
-                `;
-                tbody.appendChild(row);
-            });
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">No entries found for this mode</td></tr>';
+            } else {
+                entries.forEach((entry, index) => {
+                    const rank = this.currentPage * this.entriesPerPage + index + 1;
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${rank}</td>
+                        <td>${entry.player_name}</td>
+                        <td>${entry.streak}</td>
+                        <td>${entry.points !== null ? entry.points : 'N/A'}</td>
+                        <td>${new Date(entry.created_at).toLocaleDateString()}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
         } catch (error) {
             console.error('Error loading leaderboard:', error);
             tbody.innerHTML = '<tr><td colspan="5">Error loading leaderboard</td></tr>';
@@ -183,12 +228,46 @@ export class LeaderboardManager {
     }
 
     /**
+     * Saves a scramble mode score with specific difficulty
+     * @param {string} playerName - Name of the player
+     * @param {number} streak - Player's streak count
+     * @param {string} difficulty - Scramble difficulty (normal, hard, filler)
+     * @param {number} points - Player's total points (optional)
+     * @returns {Promise<boolean>} Success status of the save operation
+     */
+    async saveScrambleScore(playerName, streak, difficulty, points = null) {
+        try {
+            const entry = {
+                player_name: playerName,
+                streak: streak,
+                mode: `scramble_${difficulty}`
+            };
+            
+            // Only add points if provided
+            if (points !== null) {
+                entry.points = points;
+            }
+            
+            const { error } = await this.supabase
+                .from('leaderboard_entries')
+                .insert([entry]);
+
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error saving scramble score:', error);
+            return false;
+        }
+    }
+
+    /**
      * Displays a prompt for the player to enter their name when saving a score.
      * @param {number} streak - Player's streak to save
      * @param {string} mode - Game mode the streak was achieved in
      * @param {number} points - Player's total points (optional)
+     * @param {string} difficulty - Difficulty for scramble mode (optional)
      */
-    showNamePrompt(streak, mode, points = null) {
+    showNamePrompt(streak, mode, points = null, difficulty = null) {
         const dialog = document.createElement('div');
         dialog.className = 'name-prompt-dialog';
         
@@ -217,7 +296,13 @@ export class LeaderboardManager {
             const name = nameInput.value.trim();
             
             if (name) {
-                const success = await this.saveScore(name, streak, mode, points);
+                let success;
+                if (mode === 'scramble' && difficulty) {
+                    success = await this.saveScrambleScore(name, streak, difficulty, points);
+                } else {
+                    success = await this.saveScore(name, streak, mode, points);
+                }
+                
                 if (success) {
                     alert('Score saved successfully!');
                 } else {

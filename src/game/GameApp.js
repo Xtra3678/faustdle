@@ -1,210 +1,455 @@
 import { names } from '../data/characters.js';
-import { compareTraits } from '../utils/gameLogic.js';
-import { APConnection } from '../components/APConnection.js';
-import { apClient } from '../archipelago/client.js';
 import { AutocompleteManager } from './AutocompleteManager.js';
 import { CharacterSelector } from './CharacterSelector.js';
 import { TimerManager } from './TimerManager.js';
-import { UIManager } from './UIManager.js';
 import { ResultsManager } from './ResultsManager.js';
+import { UIManager } from './UIManager.js';
+import { ScrambleManager } from './ScrambleManager.js';
+import { ScrambleUI } from './ScrambleUI.js';
 import { LeaderboardManager } from './LeaderboardManager.js';
+import { APConnection } from '../components/APConnection.js';
+import { apClient } from '../archipelago/client.js';
 import { DiscordManager } from '../discord/DiscordManager.js';
 import { MusicManager } from '../audio/MusicManager.js';
-import { DiscordProxy } from '../utils/DiscordProxy.js';
-import seedrandom from 'seedrandom';
+import { compareTraits } from '../utils/gameLogic.js';
 import { createClient } from '@supabase/supabase-js';
-
-// Make seedrandom available globally
-window.Math.seedrandom = seedrandom;
+import { DiscordProxy } from '../utils/DiscordProxy.js';
 
 export default class GameApp {
     constructor() {
-        this.chosenCharacter = null;
-        this.currentSeed = null;
-        this.guessHistory = [];
-        this.gameMode = null;
-        this.startTime = null;
-        this.elapsedTimeInterval = null;
-        this.streakCount = 0;
-        this.streakPoints = 0; // New: track total points in streak mode
-        this.currentRoundPoints = 0; // New: track points for current round
-        this.isStreakMode = false;
-        this.selectedStreakMode = 'normal';
-        this.previousWinner = null;
-        this.isDiscordAuthenticated = false;
+        this.supabase = null;
         this.discordProxy = null;
-        this.originalSupabase = null;
-        
-        this.initializeSupabase();
-        this.autocomplete = new AutocompleteManager();
+        this.autocompleteManager = new AutocompleteManager();
         this.characterSelector = new CharacterSelector();
-        this.timer = new TimerManager();
-        this.ui = new UIManager(this.supabase);
-        this.results = new ResultsManager();
-        this.leaderboardManager = new LeaderboardManager(this.supabase);
-        this.leaderboardManager.createLeaderboardDialog();
-        this.discord = new DiscordManager();
+        this.timerManager = new TimerManager();
+        this.resultsManager = new ResultsManager();
+        this.uiManager = null;
+        this.scrambleManager = new ScrambleManager(this.characterSelector);
+        this.scrambleUI = new ScrambleUI();
+        this.leaderboardManager = null;
+        this.apConnection = null;
+        this.discordManager = new DiscordManager();
         this.musicManager = new MusicManager();
         
-        // Initialize Discord with Supabase
-        this.discord.initialize(this.supabase).then(() => {
-            // Set up Discord proxy if we're in Discord
-            if (this.discord.sdk) {
-                this.discordProxy = new DiscordProxy(this.discord.sdk);
-                console.log('Discord proxy status:', this.discordProxy.getProxyStatus());
+        this.chosenCharacter = null;
+        this.guessHistory = [];
+        this.gameMode = 'normal';
+        this.currentSeed = null;
+        this.startTime = null;
+        this.isStreakMode = false;
+        this.streakCount = 0;
+        this.streakDifficulty = 'normal';
+        this.totalPoints = 0;
+        this.gameStarted = false;
+        this.isScrambleMode = false;
+        this.scrambleDifficulty = 'normal';
+        this.previousWinner = null;
+        this.isDiscordAuthenticated = false;
+        
+        // Secret seed functionality
+        this.scrambleFeaturesUnlocked = this.checkScrambleUnlocked();
+        
+        this.init();
+    }
+
+    /**
+     * Check if scramble features have been unlocked
+     */
+    checkScrambleUnlocked() {
+        const unlocked = localStorage.getItem('scramble-features-unlocked');
+        return unlocked === 'true';
+    }
+
+    /**
+     * Unlock scramble features and save to localStorage
+     */
+    unlockScrambleFeatures() {
+        this.scrambleFeaturesUnlocked = true;
+        localStorage.setItem('scramble-features-unlocked', 'true');
+        this.updateScrambleVisibility();
+        console.log('Scramble features unlocked!');
+    }
+
+    /**
+     * Update visibility of scramble-related elements
+     */
+    updateScrambleVisibility() {
+        // Main menu scramble button
+        const scrambleButton = document.getElementById('scramble-mode');
+        if (scrambleButton) {
+            scrambleButton.style.display = this.scrambleFeaturesUnlocked ? 'inline-flex' : 'none';
+        }
+
+        // Streak mode scramble option
+        const streakScrambleButton = document.querySelector('.streak-difficulty-select[data-mode="scramble"]');
+        if (streakScrambleButton) {
+            streakScrambleButton.style.display = this.scrambleFeaturesUnlocked ? 'inline-flex' : 'none';
+        }
+
+        // Leaderboard scramble tab
+        const leaderboardScrambleButton = document.querySelector('.mode-select[data-mode="scramble"]');
+        if (leaderboardScrambleButton) {
+            leaderboardScrambleButton.style.display = this.scrambleFeaturesUnlocked ? 'inline-flex' : 'none';
+        }
+      const leaderboardStandardButton = document.querySelector('.mode-select[data-mode="standard"]');
+        if (leaderboardStandardButton) {
+            leaderboardStandardButton.style.display = this.scrambleFeaturesUnlocked ? 'inline-flex' : 'none';
+        }
+
+        // Update FAQ text about scramble mode
+        this.updateFAQText();
+    }
+
+    /**
+     * Update FAQ text to include or exclude scramble mode information
+     */
+    updateFAQText() {
+        const faqText = document.querySelector('.faq-text');
+        if (!faqText) return;
+
+        // Find the streak mode paragraph
+        const streakParagraph = faqText.querySelector('p:has(b)');
+        if (streakParagraph && streakParagraph.innerHTML.includes('Streak Mode:')) {
+            if (this.scrambleFeaturesUnlocked) {
+                // Include scramble mode in the text
+                streakParagraph.innerHTML = '<b>Streak Mode:</b> Build a streak on any of the 4 difficulties! You get 6 guesses on Normal, 8 on Hard and Filler, and 1 guess on Scramble. You can submit your final streak to the leaderboard. It\'s ok to use search engines, especially on Hard and Filler, but remember that your value as a person is tied to how good you are at knowing One Piece characters, so do so at your own peril!';
+            } else {
+                // Exclude scramble mode from the text
+                streakParagraph.innerHTML = '<b>Streak Mode:</b> Build a streak on any of the 3 difficulties! You get 6 guesses on Normal and 8 on Hard and Filler. You can submit your final streak to the leaderboard. It\'s ok to use search engines, especially on Hard and Filler, but remember that your value as a person is tied to how good you are at knowing One Piece characters, so do so at your own peril!';
+            }
+        }
+
+        // Find and update scramble mode description
+        const scrambleParagraph = Array.from(faqText.querySelectorAll('p')).find(p => 
+            p.innerHTML.includes('Scramble Mode:')
+        );
+        
+        if (scrambleParagraph) {
+            scrambleParagraph.style.display = this.scrambleFeaturesUnlocked ? 'block' : 'none';
+        }
+    }
+
+    async init() {
+        try {
+            await this.initializeSupabase();
+            await this.initializeDiscord();
+            await this.initializeMusic();
+            this.setupEventListeners();
+            this.setupUI();
+            this.uiManager.updateDailyCountdown();
+            
+            // Update scramble visibility after UI is set up
+            this.updateScrambleVisibility();
+            
+            // Check for daily mode progress on startup
+            this.loadDailyProgress();
+        } catch (error) {
+            console.error('Failed to initialize app:', error);
+            this.setupEventListeners();
+            this.setupUI();
+            this.uiManager.updateDailyCountdown();
+            this.updateScrambleVisibility();
+        }
+    }
+
+    async initializeSupabase() {
+        try {
+            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+            const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+            
+            if (!supabaseUrl || !supabaseKey) {
+                throw new Error('Supabase configuration missing');
+            }
+
+            // Check if we're in Discord environment and need proxy
+            if (this.discordManager.isInDiscordEnvironment()) {
+                console.log('Initializing Supabase with Discord proxy...');
                 
-                // Update Supabase client to use proxy
-                this.setupSupabaseProxy();
-            }
-            
-            // Hide Discord-incompatible features if in Discord environment
-            this.handleDiscordEnvironment();
-        }).catch(console.error);
-        
-        // Listen for Discord auth changes
-        document.addEventListener('discord-auth-change', (event) => {
-            this.handleDiscordAuthChange(event.detail);
-        });
-        
-        // Check for OAuth callback on page load
-        this.handleOAuthCallback();
-        
-        document.addEventListener('death_link_triggered', (event) => {
-            this.handleDeathLink(`Death Link from ${event.detail.source}`);
-        });
-
-        this.initializeAP();
-        this.ui.updateDailyCountdown();
-        this.setupEventListeners();
-        this.setupAutocomplete();
-        this.initializeMusic();
-        console.log('GameApp initialized');
-    }
-
-    /**
-     * Handle Discord environment by hiding incompatible features
-     */
-    handleDiscordEnvironment() {
-        if (this.discord.isInDiscordEnvironment()) {
-            console.log('Discord environment detected, hiding incompatible features');
-            
-            // Set flag to disable streak saving and daily player count
-            this.isInDiscord = true;
-            
-            // Hide specific buttons from the Other menu after they're created
-            this.hideDiscordIncompatibleButtons();
-        } else {
-            this.isInDiscord = false;
-        }
-    }
-
-    /**
-     * Hide Discord-incompatible buttons from the Other menu
-     */
-    hideDiscordIncompatibleButtons() {
-        // Use a longer timeout and retry mechanism to ensure buttons are hidden
-        const hideButtons = () => {
-            const leaderboardButton = document.getElementById('leaderboard-button');
-            const apConnectButton = document.getElementById('ap-connect-button');
-            
-            if (leaderboardButton) {
-                leaderboardButton.style.display = 'none';
-                console.log('Hidden leaderboard button in Discord environment');
-            }
-            
-            if (apConnectButton) {
-                apConnectButton.style.display = 'none';
-                console.log('Hidden archipelago button in Discord environment');
-            }
-            
-            // If buttons weren't found, try again in a bit
-            if (!leaderboardButton || !apConnectButton) {
-                setTimeout(hideButtons, 200);
-            }
-        };
-        
-        // Start trying to hide buttons immediately and retry if needed
-        setTimeout(hideButtons, 100);
-    }
-
-    /**
-     * Set up Supabase to use Discord proxy when in Discord environment
-     */
-    setupSupabaseProxy() {
-        if (!this.discordProxy || !this.discordProxy.isInDiscord()) {
-            console.log('Not in Discord environment, skipping proxy setup');
-            return;
-        }
-
-        console.log('Setting up Supabase proxy for Discord environment');
-
-        // Store original Supabase client
-        this.originalSupabase = this.supabase;
-
-        // Create a new Supabase client with custom fetch that uses Discord proxy
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-        this.supabase = createClient(supabaseUrl, supabaseKey, {
-            auth: {
-                autoRefreshToken: true,
-                persistSession: true,
-                detectSessionInUrl: true,
-                flowType: 'pkce'
-            },
-            global: {
-                fetch: async (url, options) => {
-                    try {
-                        console.log('Intercepting Supabase request:', url);
-                        
-                        // Use Discord proxy for all requests
-                        const response = await this.discordProxy.fetch(url, options);
-                        console.log('Proxied request successful:', response.status);
-                        return response;
-                    } catch (error) {
-                        console.error('Proxied request failed:', error);
-                        
-                        // In Discord environment, don't fallback to direct fetch as it will fail due to CSP
-                        throw new Error(`Discord proxy request failed: ${error.message}`);
-                    }
+                // Import Discord SDK to get the instance
+                const module = await import('@discord/embedded-app-sdk');
+                const DiscordSDK = module.DiscordSDK || module.Discord || module.default;
+                
+                if (DiscordSDK) {
+                    // Create a minimal SDK instance for proxy
+                    const sdk = new DiscordSDK({ clientId: '1351722811718373447' });
+                    this.discordProxy = new DiscordProxy(sdk);
+                    
+                    // Create Supabase client with custom fetch
+                    this.supabase = createClient(supabaseUrl, supabaseKey, {
+                        global: {
+                            fetch: (url, options) => this.discordProxy.fetch(url, options)
+                        }
+                    });
+                } else {
+                    throw new Error('Discord SDK not available for proxy');
                 }
+            } else {
+                // Regular Supabase initialization
+                this.supabase = createClient(supabaseUrl, supabaseKey);
             }
-        });
 
-        // Update all managers with the new Supabase client
-        this.ui.supabase = this.supabase;
-        this.leaderboardManager.supabase = this.supabase;
+            this.uiManager = new UIManager(this.supabase);
+            this.leaderboardManager = new LeaderboardManager(this.supabase);
+            this.apConnection = new APConnection(document.querySelector('.container'));
+            
+            console.log('Supabase initialized successfully');
+        } catch (error) {
+            console.error('Supabase initialization failed:', error);
+            this.uiManager = new UIManager(null);
+            this.leaderboardManager = new LeaderboardManager(null);
+            this.apConnection = new APConnection(document.querySelector('.container'));
+        }
+    }
 
-        console.log('Supabase proxy setup complete');
+    async initializeDiscord() {
+        try {
+            await this.discordManager.initialize(this.supabase);
+            console.log('Discord integration initialized');
+            
+            // Listen for Discord auth changes
+            document.addEventListener('discord-auth-change', (event) => {
+                this.handleDiscordAuthChange(event.detail);
+            });
+            
+            // Check for OAuth callback on page load
+            this.handleOAuthCallback();
+        } catch (error) {
+            console.warn('Discord initialization failed:', error);
+        }
     }
 
     async initializeMusic() {
         try {
             await this.musicManager.initialize();
-            console.log('Music system initialized with always-playing mode');
+            console.log('Music system initialized');
         } catch (error) {
-            console.warn('Failed to initialize music system:', error);
+            console.warn('Music initialization failed:', error);
         }
     }
 
-    initializeSupabase() {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-        if (!supabaseUrl || !supabaseKey) {
-            console.error('Supabase configuration missing. Please check your environment variables.');
-            return;
+    setupUI() {
+        if (this.leaderboardManager) {
+            this.leaderboardManager.createLeaderboardDialog();
         }
+        this.createStreakModeDialog();
+        this.createScrambleDifficultyDialog();
+    }
 
-        this.supabase = createClient(supabaseUrl, supabaseKey, {
-            auth: {
-                autoRefreshToken: true,
-                persistSession: true,
-                detectSessionInUrl: true, // Enable URL detection for OAuth
-                flowType: 'pkce' // Use PKCE flow for better security
+    createStreakModeDialog() {
+        const dialog = document.createElement('div');
+        dialog.id = 'streak-mode-dialog';
+        dialog.className = 'streak-mode-dialog hidden';
+        dialog.innerHTML = `
+            <div class="streak-mode-content">
+                <h3>Select Streak Mode Difficulty</h3>
+                <div class="streak-mode-buttons">
+                    <button class="btn streak-difficulty-select" data-mode="normal">Normal Mode</button>
+                    <button class="btn btn-hard streak-difficulty-select" data-mode="hard">Hard Mode</button>
+                    <button class="btn btn-filler streak-difficulty-select" data-mode="filler">Filler Mode</button>
+                    <button class="btn btn-scramble streak-difficulty-select" data-mode="scramble" style="display: none;">Scramble Mode</button>
+                    <button class="btn btn-secondary" id="streak-difficulty-cancel">Cancel</button>
+                </div>
+            </div>
+        `;
+        document.querySelector('.container').appendChild(dialog);
+
+        // Setup event listeners
+        dialog.querySelectorAll('.streak-difficulty-select').forEach(button => {
+            button.addEventListener('click', () => {
+                const mode = button.dataset.mode;
+                if (mode === 'scramble') {
+                    // Show scramble difficulty selection for streak mode
+                    dialog.classList.add('hidden');
+                    this.showScrambleDifficultyDialog(true);
+                } else {
+                    this.startStreakMode(mode);
+                    dialog.classList.add('hidden');
+                }
+            });
+        });
+
+        dialog.querySelector('#streak-difficulty-cancel').addEventListener('click', () => {
+            dialog.classList.add('hidden');
+        });
+    }
+
+    createScrambleDifficultyDialog() {
+        // Dialog already exists in HTML, just need to set up event listeners
+        const dialog = document.getElementById('scramble-difficulty-dialog');
+        
+        dialog.querySelectorAll('.scramble-difficulty-select').forEach(button => {
+            button.addEventListener('click', () => {
+                const mode = button.dataset.mode;
+                this.scrambleDifficulty = mode;
+                
+                if (this.isStreakMode) {
+                    // Starting streak mode with scramble
+                    this.startStreakMode('scramble');
+                } else {
+                    // Starting single scramble game
+                    this.startScrambleGame(mode);
+                }
+                
+                dialog.classList.add('hidden');
+            });
+        });
+
+        dialog.querySelector('#scramble-difficulty-cancel').addEventListener('click', () => {
+            dialog.classList.add('hidden');
+        });
+    }
+
+    showScrambleDifficultyDialog(isFromStreak = false) {
+        const dialog = document.getElementById('scramble-difficulty-dialog');
+        this.isStreakMode = isFromStreak;
+        dialog.classList.remove('hidden');
+    }
+
+    setupEventListeners() {
+        // Mode selection buttons
+        document.getElementById('normal-mode')?.addEventListener('click', () => this.startGame('normal'));
+        document.getElementById('hard-mode')?.addEventListener('click', () => this.startGame('hard'));
+        document.getElementById('filler-mode')?.addEventListener('click', () => this.startGame('filler'));
+        document.getElementById('scramble-mode')?.addEventListener('click', () => this.showScrambleDifficultyDialog(false));
+        document.getElementById('daily-mode')?.addEventListener('click', () => this.startDailyGame());
+        document.getElementById('streak-mode')?.addEventListener('click', () => this.showStreakModeDialog());
+
+        // Seed functionality
+        document.getElementById('seed-start')?.addEventListener('click', () => this.startGameWithSeed());
+        document.getElementById('generate-seed')?.addEventListener('click', () => this.showSeedGenerator());
+        document.getElementById('generate-seed-for-character')?.addEventListener('click', () => this.generateSeedForCharacter());
+        document.getElementById('use-generated-seed')?.addEventListener('click', () => this.useGeneratedSeed());
+        document.getElementById('back-to-main')?.addEventListener('click', () => this.backToMainMenu());
+
+        // Game controls
+        document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
+        document.getElementById('skip-button')?.addEventListener('click', () => this.skipCharacter());
+        document.getElementById('play-again')?.addEventListener('click', () => this.playAgain());
+
+        // FAQ dialog
+        document.getElementById('faq-button')?.addEventListener('click', () => this.showFAQ());
+        document.getElementById('faq-back')?.addEventListener('click', () => this.hideFAQ());
+
+        // Leaderboard button
+        document.getElementById('leaderboard-button')?.addEventListener('click', () => this.showLeaderboard());
+
+        // Enter key support
+        document.getElementById('guess-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.makeGuess();
+        });
+
+        document.getElementById('seed-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.startGameWithSeed();
+        });
+
+        document.getElementById('character-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.generateSeedForCharacter();
+        });
+
+        // AP connection events
+        document.addEventListener('ap-connect-request', (event) => {
+            this.handleAPConnection(event.detail);
+        });
+
+        // Death link events
+        document.addEventListener('death_link_received', () => {
+            if (this.gameStarted) {
+                this.skipCharacter(true);
             }
         });
-        console.log('Supabase client initialized');
+
+        document.addEventListener('death_link_triggered', () => {
+            if (this.gameStarted) {
+                this.skipCharacter(true);
+            }
+        });
+    }
+
+    // Daily mode caching methods
+    getDailyChallengeCache() {
+        const cache = localStorage.getItem('dailyChallenge');
+        if (!cache) return null;
+        
+        try {
+            const data = JSON.parse(cache);
+            const today = new Date().toISOString().split('T')[0];
+            
+            if (data.date === today) {
+                return data;
+            }
+            
+            localStorage.removeItem('dailyChallenge');
+            return null;
+        } catch (error) {
+            console.error('Error parsing daily challenge cache:', error);
+            return null;
+        }
+    }
+
+    saveDailyChallengeCache(data) {
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const cacheData = {
+                date: today,
+                completed: data.completed || false,
+                character: data.character,
+                guessHistory: data.guessHistory || [],
+                completionTime: data.completionTime || null,
+                startTime: data.startTime || null,
+                inProgress: data.inProgress || false
+            };
+            localStorage.setItem('dailyChallenge', JSON.stringify(cacheData));
+            console.log('Daily challenge cache saved:', cacheData);
+        } catch (error) {
+            console.error('Error saving daily challenge cache:', error);
+        }
+    }
+
+    loadDailyProgress() {
+        const cache = this.getDailyChallengeCache();
+        if (!cache) return false;
+
+        // If already completed, don't load progress
+        if (cache.completed) return false;
+
+        // If there's progress but not completed, restore the game state
+        if (cache.inProgress && cache.character) {
+            console.log('Loading daily progress from cache:', cache);
+            
+            // Restore game state
+            this.gameMode = 'daily';
+            window.gameMode = 'daily';
+            this.currentSeed = this.getDailySeed();
+            this.chosenCharacter = cache.character.name;
+            this.guessHistory = cache.guessHistory || [];
+            
+            // Restore timer if there was a start time
+            if (cache.startTime) {
+                this.timerManager.startTime = cache.startTime;
+                this.timerManager.startTimer();
+            }
+
+            // Show game UI
+            this.showGamePlay();
+            
+            // Hide skip button for daily mode
+            const skipButton = document.getElementById('skip-button');
+            if (skipButton) {
+                skipButton.style.display = 'none';
+            }
+
+            // Restore previous guesses to the UI
+            if (this.guessHistory.length > 0) {
+                this.guessHistory.forEach(guess => {
+                    this.resultsManager.displayResults(guess.name, guess.results);
+                });
+            }
+
+            this.gameStarted = true;
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -262,7 +507,7 @@ export default class GameApp {
         }
 
         if (this.isDiscordAuthenticated) {
-            const discordAuth = this.discord.getAuth();
+            const discordAuth = this.discordManager.getAuth();
             const discordUser = discordAuth?.getDiscordUserInfo();
             const username = discordUser?.username || discordUser?.global_name || 'Discord User';
             
@@ -282,530 +527,342 @@ export default class GameApp {
         }
     }
 
-    getDailyChallengeCache() {
-        const cache = localStorage.getItem('dailyChallenge');
-        if (!cache) return null;
-        
-        try {
-            const data = JSON.parse(cache);
-            const today = new Date().toISOString().split('T')[0];
-            
-            if (data.date === today) {
-                return data;
-            }
-            
-            localStorage.removeItem('dailyChallenge');
-            return null;
-        } catch (error) {
-            console.error('Error parsing daily challenge cache:', error);
-            return null;
-        }
-    }
-
-    saveDailyChallengeCache(data) {
-        try {
-            const today = new Date().toISOString().split('T')[0];
-            const cacheData = {
-                date: today,
-                completed: data.completed || false,
-                character: data.character,
-                guessHistory: data.guessHistory || [],
-                completionTime: data.completionTime || null,
-                startTime: data.startTime || null,
-                inProgress: data.inProgress || false
-            };
-            localStorage.setItem('dailyChallenge', JSON.stringify(cacheData));
-            console.log('Daily challenge cache saved:', cacheData);
-        } catch (error) {
-            console.error('Error saving daily challenge cache:', error);
-        }
-    }
-
-    loadDailyProgress() {
-        const cache = this.getDailyChallengeCache();
-        if (!cache) return false;
-
-        // If already completed, don't load progress
-        if (cache.completed) return false;
-
-        // If there's progress but not completed, restore the game state
-        if (cache.inProgress && cache.character) {
-            console.log('Loading daily progress from cache:', cache);
-            
-            // Restore game state
-            this.gameMode = 'daily';
-            window.gameMode = 'daily';
-            this.currentSeed = this.getDailySeed();
-            this.chosenCharacter = {
-                name: cache.character.name,
-                traits: cache.character.traits
-            };
-            this.guessHistory = cache.guessHistory || [];
-            
-            // Restore timer if there was a start time
-            if (cache.startTime) {
-                this.timer.startTime = cache.startTime;
-                this.timer.startTimer();
-            }
-
-            // Show game UI
-            document.getElementById('game-setup').classList.add('hidden');
-            document.getElementById('game-play').classList.remove('hidden');
-            document.getElementById('skip-button').style.display = 'none';
-
-            // Restore previous guesses to the UI
-            if (this.guessHistory.length > 0) {
-                this.guessHistory.forEach(guess => {
-                    this.results.displayResults(guess.name, guess.results);
-                });
-            }
-
-            return true;
-        }
-
-        return false;
-    }
-
     showStreakModeDialog() {
-        let dialog = document.getElementById('streak-mode-dialog');
-        if (!dialog) {
-            dialog = document.createElement('div');
-            dialog.id = 'streak-mode-dialog';
-            dialog.className = 'streak-mode-dialog';
-            dialog.innerHTML = `
-                <div class="streak-mode-content">
-                    <h3>Select Streak Mode Difficulty</h3>
-                    <div class="streak-mode-buttons">
-                        <button class="btn streak-mode-select" data-mode="normal">Normal Mode</button>
-                        <button class="btn btn-hard streak-mode-select" data-mode="hard">Hard Mode</button>
-                        <button class="btn btn-filler streak-mode-select" data-mode="filler">Filler Mode</button>
-                        <button class="btn btn-secondary" id="streak-mode-cancel">Cancel</button>
-                    </div>
-                </div>
-            `;
-            document.querySelector('.container').appendChild(dialog);
-
-            dialog.querySelector('#streak-mode-cancel').addEventListener('click', () => {
-                dialog.classList.add('hidden');
-            });
-        }
+        const dialog = document.getElementById('streak-mode-dialog');
         dialog.classList.remove('hidden');
     }
 
-    /**
-     * Get maximum guesses allowed for a given mode
-     */
-    getMaxGuessesForMode(mode) {
-        switch (mode) {
-            case 'normal':
-                return 6;
-            case 'hard':
-            case 'filler':
-                return 8;
-            default:
-                return 6;
-        }
-    }
-
-    /**
-     * Calculate points for current round based on guesses used
-     */
-    calculateRoundPoints(guessCount, mode) {
-        const maxGuesses = this.getMaxGuessesForMode(mode);
-        return Math.max(0, maxGuesses - guessCount);
-    }
-
-    setupEventListeners() {
-        const normalModeButton = document.getElementById('normal-mode');
-        const hardModeButton = document.getElementById('hard-mode');
-        const fillerModeButton = document.getElementById('filler-mode');
-        const dailyModeButton = document.getElementById('daily-mode');
-        const seedStartButton = document.getElementById('seed-start');
-        const guessButton = document.getElementById('guess-button');
-        const skipButton = document.getElementById('skip-button');
-        const playAgainButton = document.getElementById('play-again');
-        const generateSeedButton = document.getElementById('generate-seed');
-        const generateSeedForCharacterButton = document.getElementById('generate-seed-for-character');
-        const useGeneratedSeedButton = document.getElementById('use-generated-seed');
-        const backToMainButton = document.getElementById('back-to-main');
-        const faqButton = document.getElementById('faq-button');
-        const faqBackButton = document.getElementById('faq-back');
-        const streakModeButton = document.getElementById('streak-mode');
-
-        const otherButtons = document.querySelector('.other-buttons');
-        
-        // Always add leaderboard button (will be hidden later if in Discord)
-        const leaderboardButton = document.createElement('button');
-        leaderboardButton.id = 'leaderboard-button';
-        leaderboardButton.className = 'btn btn-leaderboard';
-        leaderboardButton.textContent = 'Leaderboard';
-        leaderboardButton.addEventListener('click', () => {
-            document.getElementById('other-dialog').classList.add('hidden');
-            const leaderboardDialog = document.getElementById('leaderboard-dialog');
-            leaderboardDialog.classList.remove('hidden');
-            this.leaderboardManager.loadLeaderboard('normal');
-        });
-        otherButtons.insertBefore(leaderboardButton, otherButtons.querySelector('#other-cancel'));
-
-        if (normalModeButton) {
-            normalModeButton.addEventListener('click', () => this.startGame('normal'));
-        }
-
-        if (hardModeButton) {
-            hardModeButton.addEventListener('click', () => this.startGame('hard'));
-        }
-
-        if (fillerModeButton) {
-            fillerModeButton.addEventListener('click', () => this.startGame('filler'));
-        }
-
-        if (dailyModeButton) {
-            dailyModeButton.addEventListener('click', () => this.startDailyGame());
-        }
-
-        if (streakModeButton) {
-            streakModeButton.addEventListener('click', () => {
-                this.showStreakModeDialog();
-            });
-        }
-
-        if (generateSeedButton) {
-            generateSeedButton.addEventListener('click', () => {
-                document.getElementById('other-dialog').classList.add('hidden');
-                document.getElementById('game-setup').classList.add('hidden');
-                document.getElementById('seed-generator').classList.remove('hidden');
-            });
-        }
-
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('streak-mode-select')) {
-                this.selectedStreakMode = e.target.dataset.mode;
-                this.startStreakMode();
-                document.getElementById('streak-mode-dialog').classList.add('hidden');
+    showLeaderboard() {
+        const dialog = document.getElementById('leaderboard-dialog');
+        if (dialog) {
+            dialog.classList.remove('hidden');
+            // Load default leaderboard (normal mode)
+            if (this.leaderboardManager) {
+                this.leaderboardManager.loadLeaderboard();
             }
-        });
-
-        if (generateSeedForCharacterButton) {
-            generateSeedForCharacterButton.addEventListener('click', () => this.generateSeedForCharacter());
         }
-
-        if (useGeneratedSeedButton) {
-            useGeneratedSeedButton.addEventListener('click', () => {
-                document.getElementById('seed-generator').classList.add('hidden');
-                document.getElementById('game-setup').classList.remove('hidden');
-                document.getElementById('seed-input').value = generatedSeed;
-            });
-        }
-
-        if (backToMainButton) {
-            backToMainButton.addEventListener('click', () => {
-                document.getElementById('seed-generator').classList.add('hidden');
-                document.getElementById('game-setup').classList.remove('hidden');
-                document.getElementById('character-input').value = '';
-                document.getElementById('generated-seed').classList.add('hidden');
-            });
-        }
-
-        if (seedStartButton) {
-            seedStartButton.addEventListener('click', () => this.startGameWithSeed());
-        }
-
-        if (guessButton) {
-            guessButton.addEventListener('click', () => this.makeGuess());
-        }
-
-        if (skipButton) {
-            skipButton.addEventListener('click', () => this.skipGame());
-        }
-
-        if (playAgainButton) {
-            playAgainButton.addEventListener('click', () => this.resetGame());
-        }
-
-        if (faqButton) {
-            faqButton.addEventListener('click', () => {
-                document.getElementById('other-dialog').classList.add('hidden');
-                document.getElementById('faq-dialog').classList.remove('hidden');
-            });
-        }
-
-        if (faqBackButton) {
-            faqBackButton.addEventListener('click', () => {
-                document.getElementById('faq-dialog').classList.add('hidden');
-                document.getElementById('other-dialog').classList.remove('hidden');
-            });
-        }
-
-        const guessInput = document.getElementById('guess-input');
-        if (guessInput) {
-            guessInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.makeGuess();
-                }
-            });
-        }
-
-        const seedInput = document.getElementById('seed-input');
-        if (seedInput) {
-            seedInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.startGameWithSeed();
-                }
-            });
-        }
-
-        const characterInput = document.getElementById('character-input');
-        if (characterInput) {
-            characterInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.generateSeedForCharacter();
-                }
-            });
-        }
+        // Hide other dialog
+        document.getElementById('other-dialog').classList.add('hidden');
     }
 
-    initializeAP() {
-        // Only initialize AP if not in Discord environment
-        if (this.discord.isInDiscordEnvironment()) {
-            console.log('Skipping AP initialization in Discord environment');
-            return;
-        }
-
-        const seedGenerator = document.querySelector('.seed-generator');
-        if (seedGenerator) {
-            new APConnection(seedGenerator);
-        }
-
-        document.addEventListener('ap-connect-request', async (event) => {
-            const { address, port, slot, password, deathLink } = event.detail;
+    async handleAPConnection({ address, port, slot, password, deathLink }) {
+        try {
+            apClient.setGameMode(this.gameMode);
             const success = await apClient.connect(address, port, slot, password, deathLink);
             
             if (success) {
-                alert('Connected to Archipelago!');
-                this.updateGameModesVisibility(true);
-                this.setupAPHints();
-            } else {
-                alert('Failed to connect to Archipelago. Please check your connection details.');
-            }
-        });
-
-        apClient.on('connected', () => {
-            this.updateGameModesVisibility(true);
-        });
-
-        apClient.on('disconnected', () => {
-            this.updateGameModesVisibility(false);
-        });
-
-        apClient.on('connection_error', () => {
-            alert('Connection to Archipelago failed. The server might be unavailable.');
-        });
-
-        apClient.on('server_error', (error) => {
-            alert(`Archipelago server error: ${error.text || 'Unknown error'}`);
-        });
-    }
-
-    setupAutocomplete() {
-        const guessInput = document.getElementById('guess-input');
-        if (guessInput) {
-            this.autocomplete.setupAutocomplete(guessInput);
-        }
-
-        const characterInput = document.getElementById('character-input');
-        if (characterInput) {
-            this.autocomplete.setupAutocomplete(characterInput);
-        }
-    }
-
-    startStreakMode() {
-        this.isStreakMode = true;
-        this.streakCount = 0;
-        this.streakPoints = 0; // Reset total points
-        this.currentRoundPoints = 0; // Reset round points
-        this.ui.toggleStreakModeUI(true);
-        this.startGame(this.selectedStreakMode);
-    }
-
-    startGame(mode) {
-        this.gameMode = mode;
-        window.gameMode = mode;
-        this.currentSeed = Math.random().toString(36).substring(2, 15);
-        document.getElementById('game-setup').classList.add('hidden');
-        document.getElementById('game-play').classList.remove('hidden');
-        
-        // Only show skip button if not in daily mode
-        const skipButton = document.getElementById('skip-button');
-        if (skipButton) {
-            skipButton.style.display = mode === 'daily' ? 'none' : 'block';
-        }
-        
-        try {
-            this.chosenCharacter = this.characterSelector.selectRandomCharacter(mode, this.currentSeed);
-            this.timer.startTimer();
-            
-            // Update Discord presence
-            this.discord.updateGameActivity(mode, 0);
-            
-            if (apClient.isConnected()) {
-                apClient.setGameMode(mode);
-            }
-
-            if (this.isStreakMode && this.previousWinner) {
-                setTimeout(() => {
-                    const results = compareTraits(names[this.previousWinner], this.chosenCharacter.traits);
-                    this.results.displayResults(this.previousWinner, results);
-                    this.guessHistory.push({ name: this.previousWinner, results });
-                    // Update Discord presence with guess count
-                    this.discord.updateGameActivity(mode, this.guessHistory.length);
-                }, 100);
+                console.log('Connected to Archipelago successfully');
             }
         } catch (error) {
-            alert('Error: Could not find a valid character. Please try again.');
-            this.resetGame();
+            console.error('Failed to connect to Archipelago:', error);
+        }
+    }
+
+    startStreakMode(difficulty) {
+        this.isStreakMode = true;
+        this.streakDifficulty = difficulty;
+        this.streakCount = 0;
+        this.totalPoints = 0;
+        this.uiManager.toggleStreakModeUI(true);
+        
+        if (difficulty === 'scramble') {
+            this.startScrambleGame(this.scrambleDifficulty, true);
+        } else {
+            this.startGame(difficulty, null, true);
+        }
+    }
+
+    startScrambleGame(difficulty, isStreak = false) {
+        this.gameMode = 'scramble';
+        this.isScrambleMode = true;
+        this.scrambleDifficulty = difficulty;
+        this.isStreakMode = isStreak;
+        
+        if (isStreak) {
+            this.streakDifficulty = 'scramble';
+        }
+        
+        const seed = this.generateSeed();
+        
+        try {
+            const scrambleData = this.scrambleManager.generateScrambleGame(difficulty, seed);
+            this.chosenCharacter = scrambleData.correctCharacter;
+            
+            this.showGamePlay();
+            this.scrambleUI.createScrambleUI();
+            
+            if (isStreak) {
+                this.scrambleUI.updateStreakInstructions(this.streakCount + 1);
+            }
+            
+            // Display the 5 random characters in the results table with proper comparison
+            this.displayScrambleCharacters();
+            
+            this.timerManager.startTimer();
+            this.gameStarted = true;
+            
+            // Hide skip button in scramble mode
+            const skipButton = document.getElementById('skip-button');
+            if (skipButton) {
+                skipButton.style.display = 'none';
+            }
+            
+            // Update Discord activity
+            if (this.discordManager.connected) {
+                if (isStreak) {
+                    this.discordManager.updateStreakActivity('scramble', this.streakCount);
+                } else {
+                    this.discordManager.updateGameActivity('scramble', 0);
+                }
+            }
+            
+        } catch (error) {
+            console.error('Failed to start scramble game:', error);
+            alert('Failed to start scramble game. Please try again.');
+        }
+    }
+
+    displayScrambleCharacters() {
+        const scrambleCharacters = this.scrambleManager.getScrambleCharactersWithTraits();
+        const correctTraits = this.scrambleManager.getCorrectCharacterTraits();
+        
+        // Clear existing results
+        this.resultsManager.clearResults();
+        
+        // Display each character with proper comparison to the correct answer
+        scrambleCharacters.forEach(character => {
+            const results = compareTraits(character.traits, correctTraits);
+            this.resultsManager.displayResults(character.name, results);
+        });
+    }
+
+    async startDailyGame() {
+        // First, try to load any existing progress
+        if (this.loadDailyProgress()) {
+            console.log('Loaded daily progress from cache');
+            return;
+        }
+
+        // Check for completed daily challenge
+        const cache = this.getDailyChallengeCache();
+        if (cache?.completed) {
+            this.gameMode = 'daily';
+            window.gameMode = 'daily';
+            this.showGameOver();
+            
+            this.uiManager.showGameOver(
+                `You've already completed today's challenge!`,
+                cache.character.name,
+                null,
+                false,
+                0,
+                cache.completionTime,
+                null,
+                null,
+                this.discordManager.isInDiscordEnvironment()
+            );
+            
+            this.guessHistory = cache.guessHistory;
+            document.getElementById('emoji-grid').textContent = this.resultsManager.generateEmojiGrid(this.guessHistory.map(g => g.results));
+            this.resultsManager.displayCachedResults(cache.guessHistory);
+            
+            // Only get current player count from database if not in Discord environment
+            if (!this.discordManager.isInDiscordEnvironment()) {
+                try {
+                    const today = new Date().toISOString().split('T')[0];
+                    const { data } = await this.supabase
+                        .from('daily_players')
+                        .select('player_count')
+                        .eq('date', today)
+                        .single();
+
+                    if (data) {
+                        this.uiManager.updateDailyPlayerCount(data.player_count);
+                    }
+                } catch (error) {
+                    console.error('Error fetching daily player count:', error);
+                }
+            }
+            
+            return;
+        }
+
+        // Start new daily game
+        this.startGame('daily');
+    }
+
+    startGame(mode, customSeed = null, isStreak = false) {
+        this.gameMode = mode;
+        this.isScrambleMode = false;
+        this.isStreakMode = isStreak;
+        
+        let seed;
+        if (customSeed) {
+            seed = customSeed;
+        } else if (mode === 'daily') {
+            seed = this.getDailySeed();
+        } else {
+            seed = this.generateSeed();
+        }
+
+        this.currentSeed = seed;
+
+        try {
+            const character = this.characterSelector.selectRandomCharacter(mode, seed);
+            this.chosenCharacter = character.name;
+            
+            this.showGamePlay();
+            this.resultsManager.clearResults();
+            this.scrambleUI.removeScrambleUI();
+            this.timerManager.startTimer();
+            this.gameStarted = true;
+            
+            // Handle skip button visibility
+            const skipButton = document.getElementById('skip-button');
+            if (skipButton) {
+                if (mode === 'daily') {
+                    skipButton.style.display = 'none';
+                } else {
+                    skipButton.style.display = 'inline-flex';
+                }
+            }
+
+            // Save initial progress for daily mode
+            if (mode === 'daily') {
+                this.saveDailyChallengeCache({
+                    character: { name: character.name, traits: character.traits },
+                    guessHistory: [],
+                    startTime: this.timerManager.startTime,
+                    inProgress: true,
+                    completed: false
+                });
+            }
+            
+            // Update Discord activity
+            if (this.discordManager.connected) {
+                if (isStreak) {
+                    this.discordManager.updateStreakActivity(mode, this.streakCount);
+                } else {
+                    this.discordManager.updateGameActivity(mode, 0);
+                }
+            }
+            
+        } catch (error) {
+            console.error('Failed to start game:', error);
+            alert('Failed to start game. Please try again.');
         }
     }
 
     makeGuess() {
         const guessInput = document.getElementById('guess-input');
-        const guessValue = guessInput.value;
+        const guess = guessInput.value.trim();
         
-        const exactName = this.characterSelector.findCharacterName(guessValue);
-        if (!exactName) {
-            alert('Invalid name, try again.');
+        if (!guess) return;
+        
+        const characterName = this.characterSelector.findCharacterName(guess);
+        if (!characterName) {
+            alert('Character not found! Please check the spelling or use the autocomplete suggestions.');
             return;
         }
-        
-        const results = compareTraits(names[exactName], this.chosenCharacter.traits);
-        this.results.displayResults(exactName, results);
-        this.guessHistory.push({ name: exactName, results });
-        
-        // Save progress for daily mode after each guess
-        if (this.gameMode === 'daily') {
-            this.saveDailyChallengeCache({
-                character: this.chosenCharacter,
-                guessHistory: this.guessHistory,
-                startTime: this.timer.startTime,
-                inProgress: true,
-                completed: false
-            });
-        }
-        
-        // Update Discord presence with new guess
-        this.discord.addGuess({ name: exactName, results });
-        
-        const isCorrectGuess = exactName === this.chosenCharacter.name;
-        
-        const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
-        if (this.isStreakMode && this.guessHistory.length >= maxGuesses && !isCorrectGuess) {
-            this.handleStreakLoss();
-            return;
-        }
-        
-        if (apClient.isConnected()) {
-            apClient.submitGuess(exactName, {
-                correct: isCorrectGuess,
-                matches: results.filter(r => r.match).length,
-                total: results.length
-            });
 
-            if (apClient.isDeathLinkEnabled() && this.guessHistory.length > maxGuesses) {
-                apClient.sendDeathLink('Too many guesses');
-                this.handleDeathLink('Too many guesses');
-                return;
-            }
-        }
-
-        if (isCorrectGuess) {
-            // Calculate points for this round if in streak mode
-            if (this.isStreakMode) {
-                this.currentRoundPoints = this.calculateRoundPoints(this.guessHistory.length, this.gameMode);
-                this.streakPoints += this.currentRoundPoints;
-            }
-            this.handleCorrectGuess();
+        if (this.isScrambleMode) {
+            this.handleScrambleGuess(characterName);
+        } else {
+            this.handleNormalGuess(characterName);
         }
         
         guessInput.value = '';
     }
 
-    skipGame(isDeathLink = false) {
-        if (!this.chosenCharacter || this.gameMode === 'daily') return;
+    handleScrambleGuess(guess) {
+        const isCorrect = this.scrambleManager.isCorrectGuess(guess);
         
-        this.timer.stopTimer();
-        
-        const gamePlayElement = document.getElementById('game-play');
-        const gameOverElement = document.getElementById('game-over');
-        const gameOverMessageElement = document.getElementById('game-over-message');
-        const correctCharacterElement = document.getElementById('correct-character');
-        const seedContainer = document.getElementById('game-seed-container');
-        const gameSeedElement = document.getElementById('game-seed');
-        const emojiGridElement = document.getElementById('emoji-grid');
-        
-        if (gamePlayElement) gamePlayElement.classList.add('hidden');
-        if (gameOverElement) gameOverElement.classList.remove('hidden');
-        
-        if (gameOverMessageElement) {
-            gameOverMessageElement.textContent = isDeathLink ? 
-                'Game Over - Death Link forced skip!' : 
-                'Game skipped!';
-        }
-        
-        if (correctCharacterElement) {
-            correctCharacterElement.textContent = this.chosenCharacter.name;
-        }
-        
-        if (seedContainer && gameSeedElement) {
-            if (this.gameMode === 'daily') {
-                seedContainer.classList.add('hidden');
-            } else {
-                seedContainer.classList.remove('hidden');
-                gameSeedElement.textContent = this.currentSeed;
-            }
-        }
-
-        if (emojiGridElement) {
-            emojiGridElement.textContent = this.results.generateEmojiGrid(this.guessHistory.map(g => g.results));
-        }
-        
-        this.results.copyResultsTable();
-        this.ui.removeDailyElements();
-
-        if (!isDeathLink && apClient.isConnected() && apClient.isDeathLinkEnabled()) {
-            apClient.sendDeathLink('Skipped game');
-        }
-
-        if (this.isStreakMode) {
-            this.handleStreakLoss();
+        if (isCorrect) {
+            this.handleCorrectGuess();
+        } else {
+            this.handleIncorrectGuess();
         }
     }
 
-    handleDeathLink(reason) {
-        this.skipGame(true);
+    handleNormalGuess(characterName) {
+        const guessTraits = names[characterName];
+        const chosenTraits = names[this.chosenCharacter];
+        const results = compareTraits(guessTraits, chosenTraits);
+        
+        this.resultsManager.displayResults(characterName, results);
+        this.guessHistory.push({ name: characterName, results: results });
+        
+        // Save progress for daily mode after each guess
+        if (this.gameMode === 'daily') {
+            this.saveDailyChallengeCache({
+                character: { name: this.chosenCharacter, traits: names[this.chosenCharacter] },
+                guessHistory: this.guessHistory,
+                startTime: this.timerManager.startTime,
+                inProgress: true,
+                completed: false
+            });
+        }
+        
+        // Update Discord activity
+        if (this.discordManager.connected) {
+            this.discordManager.addGuess({ name: characterName, results: results });
+        }
+        
+        // Submit to Archipelago if connected
+        if (apClient.isConnected()) {
+            apClient.submitGuess(characterName, { correct: characterName === this.chosenCharacter });
+        }
+        
+        if (characterName === this.chosenCharacter) {
+            this.handleCorrectGuess();
+        }
     }
 
     async handleCorrectGuess() {
-        this.timer.stopTimer();
+        this.timerManager.stopTimer();
+        this.gameStarted = false;
         
+        let roundPoints = 0;
         if (this.isStreakMode) {
-            this.previousWinner = this.chosenCharacter.name;
+            this.streakCount++;
+            
+            if (this.isScrambleMode) {
+                roundPoints = 1; // Scramble mode gives 1 point
+            } else {
+                roundPoints = Math.max(1, 10 - this.guessHistory.length);
+            }
+            
+            this.totalPoints += roundPoints;
         }
+        
+        // Generate emoji grid
+        let emojiGrid;
+        if (this.isScrambleMode) {
+            emojiGrid = '🟩'; // Single green square for correct scramble guess
+        } else {
+            emojiGrid = this.resultsManager.generateEmojiGrid(this.guessHistory.map(g => g.results));
+        }
+        
+        document.getElementById('emoji-grid').textContent = emojiGrid;
+        this.resultsManager.copyResultsTable();
+        
+        const completionTime = this.timerManager.getElapsedTime();
         
         if (this.gameMode === 'daily') {
             const today = new Date().toISOString().split('T')[0];
-            const dailyNumber = this.ui.getDailyChallengeNumber();
-            const completionTime = this.timer.getElapsedTime();
+            const dailyNumber = this.uiManager.getDailyChallengeNumber();
             
             // Save completion to cache
             this.saveDailyChallengeCache({
                 completed: true,
-                character: this.chosenCharacter,
+                character: { name: this.chosenCharacter, traits: names[this.chosenCharacter] },
                 guessHistory: this.guessHistory,
                 completionTime: completionTime,
                 inProgress: false
             });
             
             // Only try to update daily player count if not in Discord environment
-            if (!this.isInDiscord) {
+            if (!this.discordManager.isInDiscordEnvironment()) {
                 try {
                     // Use authenticated call if possible, fallback to RPC
                     if (this.isDiscordAuthenticated) {
@@ -833,320 +890,393 @@ export default class GameApp {
                 }
             }
 
-            this.ui.showGameOver(
+            this.uiManager.showGameOver(
                 `Congratulations! You completed Daily Challenge #${dailyNumber}!`,
-                this.chosenCharacter.name,
+                this.chosenCharacter,
                 null,
                 false,
                 0,
                 completionTime,
                 null,
                 null,
-                this.isInDiscord // Pass Discord flag to hide player count
+                this.discordManager.isInDiscordEnvironment()
             );
 
             // Only show daily player count if not in Discord and we have the count
-            if (!this.isInDiscord && this.currentDailyCount) {
-                this.ui.updateDailyPlayerCount(this.currentDailyCount);
+            if (!this.discordManager.isInDiscordEnvironment() && this.currentDailyCount) {
+                this.uiManager.updateDailyPlayerCount(this.currentDailyCount);
             }
         } else if (this.isStreakMode) {
-            this.streakCount++;
-            this.ui.showGameOver(
-                `Congratulations! Continue your streak!`,
-                this.chosenCharacter.name,
-                this.currentSeed,
+            this.uiManager.showGameOver(
+                'Correct! Continue your streak!',
+                this.chosenCharacter,
+                null,
                 true,
                 this.streakCount,
-                null,
-                this.currentRoundPoints, // Pass round points
-                this.streakPoints, // Pass total points
-                this.isInDiscord // Pass Discord flag
+                completionTime,
+                roundPoints,
+                this.totalPoints,
+                this.discordManager.isInDiscordEnvironment()
             );
+            
+            // Auto-continue to next game after 2 seconds
+            setTimeout(() => {
+                this.continueStreak();
+            }, 2000);
         } else {
-            this.ui.showGameOver(
-                'Congratulations! You found the correct character!',
-                this.chosenCharacter.name,
+            let message = 'Congratulations! You found the correct character!';
+            if (this.isScrambleMode) {
+                message = this.scrambleUI.showScrambleGameOver(true, this.chosenCharacter);
+            }
+            
+            this.uiManager.showGameOver(
+                message,
+                this.chosenCharacter,
                 this.currentSeed,
                 false,
                 0,
+                completionTime,
                 null,
                 null,
-                null,
-                this.isInDiscord // Pass Discord flag
+                this.discordManager.isInDiscordEnvironment()
             );
         }
-        
-        document.getElementById('emoji-grid').textContent = this.results.generateEmojiGrid(this.guessHistory.map(g => g.results));
-        this.results.copyResultsTable();
     }
 
-    handleStreakLoss() {
-        this.timer.stopTimer();
-        const finalStreak = this.streakCount;
-        const finalPoints = this.streakPoints;
-        
-        this.ui.showGameOver(
-            `Game Over! Your streak ends at ${finalStreak}!`,
-            this.chosenCharacter.name,
-            this.currentSeed,
-            true,
-            finalStreak,
-            null,
-            0, // No round points for loss
-            finalPoints, // Final total points
-            this.isInDiscord // Pass Discord flag
-        );
-        document.getElementById('emoji-grid').textContent = this.results.generateEmojiGrid(this.guessHistory.map(g => g.results));
-        this.results.copyResultsTable();
-
-        // Only show name prompt for leaderboard if not in Discord environment and streak > 0
-        if (!this.isInDiscord && finalStreak > 0) {
-            this.leaderboardManager.showNamePrompt(finalStreak, this.selectedStreakMode, finalPoints);
+    handleIncorrectGuess() {
+        if (this.isStreakMode) {
+            this.endStreak();
+        } else {
+            this.timerManager.stopTimer();
+            this.gameStarted = false;
+            
+            let emojiGrid;
+            if (this.isScrambleMode) {
+                emojiGrid = '🟥'; // Single red square for incorrect scramble guess
+            } else {
+                emojiGrid = this.resultsManager.generateEmojiGrid(this.guessHistory.map(g => g.results));
+            }
+            
+            document.getElementById('emoji-grid').textContent = emojiGrid;
+            this.resultsManager.copyResultsTable();
+            
+            const completionTime = this.timerManager.getElapsedTime();
+            let message = 'Game Over! Better luck next time!';
+            if (this.isScrambleMode) {
+                message = this.scrambleUI.showScrambleGameOver(false, this.chosenCharacter);
+            }
+            
+            this.uiManager.showGameOver(
+                message,
+                this.chosenCharacter,
+                this.currentSeed,
+                false,
+                0,
+                completionTime,
+                null,
+                null,
+                this.discordManager.isInDiscordEnvironment()
+            );
         }
+    }
 
+    continueStreak() {
+        this.guessHistory = [];
+        this.resultsManager.clearResults();
+        
+        if (this.streakDifficulty === 'scramble') {
+            this.startScrambleGame(this.scrambleDifficulty, true);
+        } else {
+            this.startGame(this.streakDifficulty, null, true);
+        }
+    }
+
+    endStreak() {
+        this.timerManager.stopTimer();
+        this.gameStarted = false;
+        
+        // Send death link if connected and enabled
+        if (apClient.isConnected() && apClient.isDeathLinkEnabled()) {
+            apClient.sendDeathLink(`Streak ended at ${this.streakCount}`);
+        }
+        
+        let emojiGrid;
+        if (this.isScrambleMode) {
+            emojiGrid = '🟥'; // Single red square for failed scramble
+        } else {
+            emojiGrid = this.resultsManager.generateEmojiGrid(this.guessHistory.map(g => g.results));
+        }
+        
+        document.getElementById('emoji-grid').textContent = emojiGrid;
+        this.resultsManager.copyResultsTable();
+        
+        const completionTime = this.timerManager.getElapsedTime();
+        
+        this.uiManager.showGameOver(
+            `Streak ended at ${this.streakCount}!`,
+            this.chosenCharacter,
+            null,
+            true,
+            this.streakCount,
+            completionTime,
+            0,
+            this.totalPoints,
+            this.discordManager.isInDiscordEnvironment()
+        );
+        
+        // Show leaderboard save prompt with proper mode and difficulty
+        if (this.leaderboardManager && this.streakCount > 0) {
+            if (this.streakDifficulty === 'scramble') {
+                this.leaderboardManager.showNamePrompt(this.streakCount, 'scramble', this.totalPoints, this.scrambleDifficulty);
+            } else {
+                this.leaderboardManager.showNamePrompt(this.streakCount, this.streakDifficulty, this.totalPoints);
+            }
+        }
+        
+        this.resetStreakMode();
+    }
+
+    resetStreakMode() {
         this.isStreakMode = false;
         this.streakCount = 0;
-        this.streakPoints = 0;
-        this.currentRoundPoints = 0;
-        this.previousWinner = null;
+        this.totalPoints = 0;
+        this.streakDifficulty = 'normal';
+        this.uiManager.toggleStreakModeUI(false);
+    }
+
+    skipCharacter(isDeathLink = false) {
+        // Don't allow skipping in daily mode
+        if (this.gameMode === 'daily') return;
+        
+        if (isDeathLink && apClient.isConnected() && apClient.isDeathLinkEnabled()) {
+            apClient.sendDeathLink('Received death link');
+        }
+        
+        if (this.isStreakMode) {
+            this.endStreak();
+        } else {
+            this.timerManager.stopTimer();
+            this.gameStarted = false;
+            
+            let emojiGrid;
+            if (this.isScrambleMode) {
+                emojiGrid = '🟥'; // Single red square for skipped scramble
+            } else {
+                emojiGrid = this.resultsManager.generateEmojiGrid(this.guessHistory.map(g => g.results));
+            }
+            
+            document.getElementById('emoji-grid').textContent = emojiGrid;
+            this.resultsManager.copyResultsTable();
+            
+            const completionTime = this.timerManager.getElapsedTime();
+            const message = isDeathLink ? 'Death Link received! Game Over!' : 'You gave up! Better luck next time!';
+            
+            this.uiManager.showGameOver(
+                message,
+                this.chosenCharacter,
+                this.currentSeed,
+                false,
+                0,
+                completionTime,
+                null,
+                null,
+                this.discordManager.isInDiscordEnvironment()
+            );
+        }
+    }
+
+    playAgain() {
+        this.resetGame();
+        this.showGameSetup();
     }
 
     resetGame() {
-        document.getElementById('game-over').classList.add('hidden');
-        document.getElementById('game-setup').classList.remove('hidden');
-        this.results.clearResults();
-        this.timer.reset();
-        
+        this.chosenCharacter = null;
         this.guessHistory = [];
-        window.gameMode = null;
+        this.currentSeed = null;
+        this.gameStarted = false;
+        this.isScrambleMode = false;
+        this.scrambleDifficulty = 'normal';
+        this.timerManager.reset();
+        this.resultsManager.clearResults();
+        this.scrambleUI.removeScrambleUI();
+        this.scrambleManager.reset();
         
-        // Clear Discord guess history
-        this.discord.clearGuesses();
+        if (this.discordManager.connected) {
+            this.discordManager.clearGuesses();
+        }
         
-        if (this.isStreakMode) {
-            const currentStreak = this.streakCount;
-            const currentPoints = this.streakPoints;
-            document.getElementById('game-setup').classList.add('hidden');
-            this.startGame(this.selectedStreakMode);
-            this.streakCount = currentStreak;
-            this.streakPoints = currentPoints;
-            this.currentRoundPoints = 0; // Reset round points for new round
-            // Update Discord presence for streak mode
-            this.discord.updateStreakActivity(this.selectedStreakMode, this.streakCount);
-        } else {
-            this.chosenCharacter = null;
-            this.currentSeed = null;
-            this.gameMode = null;
-            this.streakCount = 0;
-            this.streakPoints = 0;
-            this.currentRoundPoints = 0;
-            this.isStreakMode = false;
-            this.previousWinner = null;
-            this.ui.toggleStreakModeUI(false);
+        // Deactivate easter egg mode if active
+        if (this.musicManager.isEasterEggMode) {
+            this.musicManager.deactivateEasterEggMode();
         }
     }
 
-    generateSeedForCharacter() {
-        try {
-            const characterInput = document.getElementById('character-input');
-            const exactName = this.characterSelector.findCharacterName(characterInput.value);
-            
-            if (!exactName) {
-                alert('Invalid character name, please try again.');
-                return;
-            }
+    showGameSetup() {
+        document.getElementById('game-setup').classList.remove('hidden');
+        document.getElementById('game-play').classList.add('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('seed-generator').classList.add('hidden');
+        document.getElementById('archipelago-setup').classList.add('hidden');
+    }
 
-            const characterSeed = this.generateUniqueSeedForCharacter(exactName);
-            
-            if (characterSeed) {
-                document.getElementById('seed-result').textContent = characterSeed;
-                document.getElementById('generated-seed').classList.remove('hidden');
-            } else {
-                alert('Could not generate a valid seed for this character. Please try a different character.');
-            }
-        } catch (error) {
-            console.warn('Error generating seed:', error);
-            alert('An error occurred while generating the seed. Please try again.');
+    showGamePlay() {
+        document.getElementById('game-setup').classList.add('hidden');
+        document.getElementById('game-play').classList.remove('hidden');
+        document.getElementById('game-over').classList.add('hidden');
+        document.getElementById('seed-generator').classList.add('hidden');
+        document.getElementById('archipelago-setup').classList.add('hidden');
+        
+        // Setup autocomplete
+        const guessInput = document.getElementById('guess-input');
+        if (guessInput) {
+            this.autocompleteManager.setupAutocomplete(guessInput);
         }
     }
 
-    generateUniqueSeedForCharacter(character) {
-        let attempts = 0;
-        const maxAttempts = 10000;
+    showGameOver() {
+        document.getElementById('game-setup').classList.add('hidden');
+        document.getElementById('game-play').classList.add('hidden');
+        document.getElementById('game-over').classList.remove('hidden');
+        document.getElementById('seed-generator').classList.add('hidden');
+        document.getElementById('archipelago-setup').classList.add('hidden');
+    }
+
+    showSeedGenerator() {
+        document.getElementById('game-setup').classList.add('hidden');
+        document.getElementById('seed-generator').classList.remove('hidden');
         
-        while (attempts < maxAttempts) {
-            try {
-                const seed = Math.random().toString(36).substring(2, 15);
-                const selectedCharacter = this.characterSelector.selectRandomCharacter('filler', seed);
-                
-                if (selectedCharacter.name === character) {
-                    const difficulty = selectedCharacter.traits[9];
-                    if (difficulty === 'E' || difficulty === 'H' || difficulty === 'F') {
-                        return seed;
-                    }
-                }
-                
-                attempts++;
-            } catch (error) {
-                console.warn('Error in seed generation attempt:', error);
-                attempts++;
-            }
+        const characterInput = document.getElementById('character-input');
+        if (characterInput) {
+            this.autocompleteManager.setupAutocomplete(characterInput);
         }
-        
-        return null;
+    }
+
+    showFAQ() {
+        document.getElementById('faq-dialog').classList.remove('hidden');
+        document.getElementById('other-dialog').classList.add('hidden');
+    }
+
+    hideFAQ() {
+        document.getElementById('faq-dialog').classList.add('hidden');
     }
 
     startGameWithSeed() {
         const seedInput = document.getElementById('seed-input');
-        if (!seedInput.value) {
-            alert('Please enter a seed value');
+        const seed = seedInput.value.trim();
+        
+        if (!seed) {
+            alert('Please enter a seed');
             return;
         }
 
-        const seedValue = seedInput.value.trim();
+        const lowerSeed = seed.toLowerCase();
 
-        // Check for special seeds first
-        if (seedValue.toLowerCase() === 'imu') {
+        // Check for secret seed to unlock scramble features
+        if (lowerSeed === 'persona5scramble') {
+            this.unlockScrambleFeatures();
+            seedInput.value = '';
+            alert('Scramble features unlocked!');
+            return;
+        }
+
+        // Check for page reload seeds
+        if (lowerSeed === 'imu' || lowerSeed === 'gaster') {
             window.location.reload();
             return;
         }
 
         // Check if it's the test seed to show music player
-        if (this.musicManager.isTestSeed(seedValue)) {
+        if (this.musicManager.isTestSeed(seed)) {
             this.musicManager.showMusicPlayer();
-            // Clear the seed input
             seedInput.value = '';
             return;
         }
 
         // Check if it's an easter egg track
-        if (this.musicManager.isEasterEggSeed(seedValue)) {
-            const success = this.musicManager.activateEasterEggMode(seedValue);
+        if (this.musicManager.isEasterEggSeed(seed)) {
+            const success = this.musicManager.activateEasterEggMode(seed);
             if (success) {
-                // Clear the seed input
                 seedInput.value = '';
                 return;
-            } else {
-                return;
             }
         }
 
-        // Normal seed behavior
-        this.gameMode = 'filler';
-        window.gameMode = 'filler';
-        this.currentSeed = seedValue;
-        document.getElementById('game-setup').classList.add('hidden');
-        document.getElementById('game-play').classList.remove('hidden');
-        document.getElementById('skip-button').classList.remove('hidden');
-        
-        try {
-            this.chosenCharacter = this.characterSelector.selectRandomCharacter('filler', this.currentSeed);
-            this.timer.startTimer();
-        } catch (error) {
-            alert('Error: Could not find a valid character. Please try again.');
-            this.resetGame();
-        }
+        // Normal seed behavior - start game with filler mode
+        this.startGame('filler', seed);
     }
 
-    async startDailyGame() {
-        // First, try to load any existing progress
-        if (this.loadDailyProgress()) {
-            console.log('Loaded daily progress from cache');
-            return;
-        }
-
-        // Check for completed daily challenge
-        const cache = this.getDailyChallengeCache();
-        if (cache?.completed) {
-            this.gameMode = 'daily';
-            window.gameMode = 'daily';
-            document.getElementById('game-setup').classList.add('hidden');
-            document.getElementById('game-over').classList.remove('hidden');
-            
-            this.ui.showGameOver(
-                `You've already completed today's challenge!`,
-                cache.character.name,
-                null,
-                false,
-                0,
-                cache.completionTime,
-                null,
-                null,
-                this.isInDiscord // Pass Discord flag
-            );
-            
-            this.guessHistory = cache.guessHistory;
-            document.getElementById('emoji-grid').textContent = this.results.generateEmojiGrid(this.guessHistory.map(g => g.results));
-            this.results.displayCachedResults(cache.guessHistory);
-            
-            // Only get current player count from database if not in Discord environment
-            if (!this.isInDiscord) {
-                try {
-                    const today = new Date().toISOString().split('T')[0];
-                    const { data } = await this.supabase
-                        .from('daily_players')
-                        .select('player_count')
-                        .eq('date', today)
-                        .single();
-
-                    if (data) {
-                        this.ui.updateDailyPlayerCount(data.player_count);
-                    }
-                } catch (error) {
-                    console.error('Error fetching daily player count:', error);
-                }
-            }
-            
-            return;
-        }
-
-        // Start new daily game
-        this.gameMode = 'daily';
-        window.gameMode = 'daily';
-        this.currentSeed = this.getDailySeed();
-        document.getElementById('game-setup').classList.add('hidden');
-        document.getElementById('game-play').classList.remove('hidden');
-        document.getElementById('skip-button').style.display = 'none';
+    generateSeedForCharacter() {
+        const characterInput = document.getElementById('character-input');
+        const characterName = characterInput.value.trim();
         
-        try {
-            this.chosenCharacter = this.characterSelector.selectRandomCharacter('normal', this.currentSeed);
-            this.timer.startTimer();
-
-            // Save initial progress
-            this.saveDailyChallengeCache({
-                character: this.chosenCharacter,
-                guessHistory: [],
-                startTime: this.timer.startTime,
-                inProgress: true,
-                completed: false
-            });
-
-            // Only get current player count if not in Discord environment
-            if (!this.isInDiscord) {
-                try {
-                    const today = new Date().toISOString().split('T')[0];
-                    const { data } = await this.supabase
-                        .from('daily_players')
-                        .select('player_count')
-                        .eq('date', today)
-                        .single();
-
-                    if (data) {
-                        this.currentDailyCount = data.player_count;
-                    }
-                } catch (error) {
-                    console.error('Error fetching daily player count:', error);
-                }
-            }
-        } catch (error) {
-            console.error('Error starting daily game:', error);
-            alert('Error: Could not start daily game. Please try again.');
-            this.resetGame();
+        if (!characterName) {
+            alert('Please enter a character name');
+            return;
         }
+        
+        const foundName = this.characterSelector.findCharacterName(characterName);
+        if (!foundName) {
+            alert('Character not found! Please check the spelling.');
+            return;
+        }
+        
+        const seed = this.generateSeedFromCharacter(foundName);
+        document.getElementById('seed-result').textContent = seed;
+        document.getElementById('generated-seed').classList.remove('hidden');
+    }
+
+    useGeneratedSeed() {
+        const seed = document.getElementById('seed-result').textContent;
+        this.startGame('filler', seed);
+    }
+
+    backToMainMenu() {
+        this.showGameSetup();
+        document.getElementById('generated-seed').classList.add('hidden');
+    }
+
+    generateSeed() {
+        return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     }
 
     getDailySeed() {
-        const date = new Date();
-        return `${date.getUTCFullYear()}-${date.getUTCMonth() + 1}-${date.getUTCDate()}`;
+        const today = new Date();
+        const dateString = today.toISOString().split('T')[0];
+        return `daily-${dateString}`;
+    }
+
+    generateSeedFromCharacter(characterName) {
+        let hash = 0;
+        for (let i = 0; i < characterName.length; i++) {
+            const char = characterName.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    async updateDailyPlayerCount() {
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            
+            const { error } = await this.supabase.rpc('increment_daily_players', {
+                challenge_date: today
+            });
+            
+            if (error) throw error;
+            
+            const { data, error: fetchError } = await this.supabase
+                .from('daily_players')
+                .select('player_count')
+                .eq('date', today)
+                .single();
+            
+            if (fetchError) throw fetchError;
+            
+            this.uiManager.updateDailyPlayerCount(data.player_count);
+        } catch (error) {
+            console.error('Failed to update daily player count:', error);
+        }
     }
 }

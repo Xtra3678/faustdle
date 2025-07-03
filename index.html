@@ -19,6 +19,7 @@
                     <button id="normal-mode" class="btn">Normal Mode</button>
                     <button id="hard-mode" class="btn btn-hard">Hard Mode</button>
                     <button id="filler-mode" class="btn btn-filler">Filler Mode</button>
+                    <button id="scramble-mode" class="btn btn-scramble" style="display: none;">Scramble Mode</button>
                 </div>
                 <button id="daily-mode" class="btn btn-daily">Daily Character</button>
                 <div id="daily-countdown" class="countdown">
@@ -35,6 +36,18 @@
                     <div class="button-group">
                         <button id="streak-mode" class="btn btn-streak">Streak Mode</button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="scramble-difficulty-dialog" class="scramble-difficulty-dialog hidden">
+            <div class="scramble-difficulty-content">
+                <h3>Select Scramble Mode Difficulty</h3>
+                <div class="scramble-difficulty-buttons">
+                    <button class="btn scramble-difficulty-select" data-mode="normal">Normal Mode</button>
+                    <button class="btn btn-hard scramble-difficulty-select" data-mode="hard">Hard Mode</button>
+                    <button class="btn btn-filler scramble-difficulty-select" data-mode="filler">Filler Mode</button>
+                    <button class="btn btn-secondary" id="scramble-difficulty-cancel">Cancel</button>
                 </div>
             </div>
         </div>
@@ -149,6 +162,7 @@
                     <button id="generate-seed" class="btn btn-generate">Obtain seed for character</button>
                     <button id="faq-button" class="btn btn-faq">FAQ</button>
                     <button id="ap-connect-button" class="btn btn-ap">Connect to Archipelago</button>
+                    <button id="leaderboard-button" class="btn btn-leaderboard">Leaderboard</button>
                     <a href="https://discord.gg/339W2PB4gD" target="_blank" class="btn btn-discord">Join our Discord</a>
                     <button id="other-cancel" class="btn btn-secondary">Back</button>
                 </div>
@@ -165,6 +179,7 @@
                     <p>Hard and Filler mode include characters from previous modes, you can still get Luffy in hard and you can get Luffy or Faust (hard) in filler.</p>
                     <p>Normal/Hard is generally based on vibes, Normal includes semi relevant characters who you might remember, Hard includes characters who appear in one or two chapters or SBS exclusive characters, have no speaking lines, etc.</p>
                     <p>Filler characters include characters from movies, anime filler arcs, and TV specials. Characters from video games, novels, or live shows are not on the list.</p>
+                    <p style="display: none;"><b>Scramble Mode:</b> You are presented with 5 random characters and must identify the correct one based on the traits shown. You only get one guess!</p>
                     <p>Every character, except Zoro, uses their official VIZ Media english name if one is available, with their family name being removed in most cases (Katakuri instead of Charlotte Katakuri). Exceptions include characters like Sanjuan Wolf, whose name is unrecognizable without the surname, and Justy Tinbread, whose name would be way less funny if we removed it.</p>
                     <h4>CHARACTER INFO:</h4>
                     <p><b>Devil Fruit: </b>Characters created by devil fruits, like Homies or Satellites, have that devil fruit. So Shaka counts as a Paramecia user.</p>
