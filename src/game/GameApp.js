@@ -696,6 +696,9 @@ export default class GameApp {
         this.isScrambleMode = false;
         this.isStreakMode = isStreak;
         
+        // Set window.gameMode for UI components to reference
+        window.gameMode = mode;
+        
         let seed;
         if (customSeed) {
             seed = customSeed;
@@ -849,6 +852,9 @@ export default class GameApp {
         const completionTime = this.timerManager.getElapsedTime();
         
         if (this.gameMode === 'daily') {
+            // Ensure window.gameMode is set for daily mode
+            window.gameMode = 'daily';
+            
             const today = new Date().toISOString().split('T')[0];
             const dailyNumber = this.uiManager.getDailyChallengeNumber();
             
