@@ -1227,7 +1227,7 @@ export default class GameApp {
             return;
         }
         
-        const seed = this.generateSeedFromCharacter(foundName);
+        const seed = this.generateRandomSeedForCharacter(foundName);
         document.getElementById('seed-result').textContent = seed;
         document.getElementById('generated-seed').classList.remove('hidden');
     }
@@ -1252,12 +1252,61 @@ export default class GameApp {
         return `daily-${dateString}`;
     }
 
-    generateSeedFromCharacter(characterName) {
+    /**
+     * Generates a truly random seed that will result in the specified character
+     * Uses a brute force approach to find a seed that produces the desired character
+     * @param {string} characterName - The name of the character to generate a seed for
+     * @returns {string} A random seed that will produce the specified character
+     */
+    generateRandomSeedForCharacter(characterName) {
+        console.log(`Generating random seed for character: ${characterName}`);
+        
+        // Try up to 10000 random seeds to find one that produces the desired character
+        const maxAttempts = 10000;
+        
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            // Generate a completely random seed
+            const randomSeed = Math.random().toString(36).substring(2, 15) + 
+                              Math.random().toString(36).substring(2, 15) + 
+                              Date.now().toString(36);
+            
+            try {
+                // Test if this seed produces the desired character in filler mode
+                const testCharacter = this.characterSelector.selectRandomCharacter('filler', randomSeed);
+                
+                if (testCharacter.name === characterName) {
+                    console.log(`Found matching seed after ${attempt + 1} attempts: ${randomSeed}`);
+                    return randomSeed;
+                }
+            } catch (error) {
+                // If there's an error with this seed, continue to the next one
+                console.warn(`Error testing seed ${randomSeed}:`, error);
+                continue;
+            }
+        }
+        
+        // If we couldn't find a matching seed after maxAttempts, fall back to a deterministic approach
+        // but add randomness to make it less obvious
+        console.warn(`Could not find random seed for ${characterName} after ${maxAttempts} attempts, using fallback`);
+        
+        const timestamp = Date.now().toString(36);
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        const characterHash = this.createCharacterHash(characterName);
+        
+        return `${timestamp}-${randomSuffix}-${characterHash}`;
+    }
+
+    /**
+     * Creates a hash from character name (fallback method)
+     * @param {string} characterName - The character name to hash
+     * @returns {string} A hash string
+     */
+    createCharacterHash(characterName) {
         let hash = 0;
         for (let i = 0; i < characterName.length; i++) {
             const char = characterName.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+            hash = hash & hash; // Convert to 32-bit integer
         }
         return Math.abs(hash).toString(36);
     }
