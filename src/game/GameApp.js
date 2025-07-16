@@ -324,7 +324,13 @@ export default class GameApp {
         // Game controls
         document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
         document.getElementById('skip-button')?.addEventListener('click', () => this.skipCharacter());
-        document.getElementById('play-again')?.addEventListener('click', () => this.playAgain());
+        document.getElementById('play-again').addEventListener('click', () => {
+            if (this.isStreakMode) {
+                this.continueStreak();
+            } else {
+                this.playAgain();
+            }
+        });
 
         // FAQ dialog
         document.getElementById('faq-button')?.addEventListener('click', () => this.showFAQ());
@@ -831,8 +837,11 @@ export default class GameApp {
             
             if (this.isScrambleMode) {
                 roundPoints = 1; // Scramble mode gives 1 point
+            } else 
+            if (this.streakDifficulty === 'normal') {
+                roundPoints = Math.max(1, 6 - this.guessHistory.length);
             } else {
-                roundPoints = Math.max(1, 10 - this.guessHistory.length);
+                roundPoints = Math.max(1, 8 - this.guessHistory.length);
             }
             
             this.totalPoints += roundPoints;
@@ -924,11 +933,6 @@ export default class GameApp {
                 this.totalPoints,
                 this.discordManager.isInDiscordEnvironment()
             );
-            
-            // Auto-continue to next game after 2 seconds
-            setTimeout(() => {
-                this.continueStreak();
-            }, 2000);
         } else {
             let message = 'Congratulations! You found the correct character!';
             if (this.isScrambleMode) {
@@ -946,6 +950,27 @@ export default class GameApp {
                 null,
                 this.discordManager.isInDiscordEnvironment()
             );
+        }
+    }
+
+    addStreakContinueButton() {
+        // Remove existing continue button if it exists
+        const existingButton = document.querySelector('.continue-streak-button');
+        if (existingButton) {
+            existingButton.remove();
+        }
+
+        const continueButton = document.createElement('button');
+        continueButton.className = 'btn continue-streak-button';
+        continueButton.textContent = 'Continue Streak';
+        continueButton.onclick = () => {
+            continueButton.remove();
+            this.startNextStreakRound();
+        };
+
+        const playAgainButton = document.getElementById('play-again');
+        if (playAgainButton && playAgainButton.parentNode) {
+            playAgainButton.parentNode.insertBefore(continueButton, playAgainButton);
         }
     }
 
@@ -992,6 +1017,25 @@ export default class GameApp {
         
         if (this.streakDifficulty === 'scramble') {
             this.startScrambleGame(this.scrambleDifficulty, true);
+        
+        // Auto-submit the previous character as first guess for non-scramble streak mode
+        if (!this.isScrambleMode) {
+            setTimeout(() => {
+                const guessInput = document.getElementById('guess-input');
+                if (guessInput && this.previousStreakCharacter) {
+                    guessInput.value = this.previousStreakCharacter;
+                    this.makeGuess();
+                }
+            }, 100);
+        }
+        
+        // Auto-submit previous character as first guess (non-scramble mode only)
+        if (!this.isScrambleMode && this.previousStreakCharacter) {
+            // Small delay to ensure UI is ready
+            setTimeout(() => {
+                this.makeGuess(this.previousStreakCharacter);
+            }, 100);
+        }
         } else {
             this.startGame(this.streakDifficulty, null, true);
         }
@@ -1130,6 +1174,28 @@ export default class GameApp {
         document.getElementById('game-setup').classList.add('hidden');
         document.getElementById('game-play').classList.remove('hidden');
         document.getElementById('game-over').classList.add('hidden');
+        
+        // Auto-submit previous character as first guess in streak mode (round 2+)
+        if (this.isStreakMode && this.previousStreakCharacter && !this.isScrambleMode) {
+            setTimeout(() => {
+                const guessInput = document.getElementById('guess-input');
+                if (guessInput) {
+                    guessInput.value = this.previousStreakCharacter;
+                    this.makeGuess();
+                }
+            }, 100);
+        }
+        
+        // Auto-submit previous character as first guess in non-scramble streak mode
+        if (this.isStreakMode && this.previousStreakCharacter && !this.isScrambleMode) {
+            setTimeout(() => {
+                const guessInput = document.getElementById('guess-input');
+                if (guessInput) {
+                    guessInput.value = this.previousStreakCharacter;
+                    this.makeGuess();
+                }
+            }, 100);
+        }
         document.getElementById('seed-generator').classList.add('hidden');
         document.getElementById('archipelago-setup').classList.add('hidden');
         

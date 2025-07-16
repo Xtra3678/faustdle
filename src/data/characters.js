@@ -781,7 +781,7 @@ export const arcs = [
     "Whiskey Peak",
     "Little Garden",
     "Drum Island",
-    "Arabasta",
+    "Alabasta",
     "Jaya",
     "Skypiea",
     "Long Ring Long Land",
