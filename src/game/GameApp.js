@@ -746,7 +746,14 @@ export default class GameApp {
                     completed: false
                 });
             }
-            
+
+            if (this.isStreakMode && this.previousWinner) {
+                setTimeout(() => {
+                    const results = compareTraits(names[this.previousWinner], this.chosenCharacter.traits);
+                    this.results.displayResults(this.previousWinner, results);
+                    this.guessHistory.push({ name: this.previousWinner, results });
+                }, 100);
+            }
             // Update Discord activity
             if (this.discordManager.connected) {
                 if (isStreak) {
@@ -761,13 +768,31 @@ export default class GameApp {
             alert('Failed to start game. Please try again.');
         }
     }
-
+     /**
+     * Get maximum guesses allowed for a given mode
+     */
+     getMaxGuessesForMode(mode) {
+        switch (mode) {
+            case 'normal':
+                return 6;
+            case 'hard':
+            case 'filler':
+                return 8;
+            default:
+                return 6;
+        }
+    }
     makeGuess() {
         const guessInput = document.getElementById('guess-input');
         const guess = guessInput.value.trim();
         
         if (!guess) return;
         
+        const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
+        if (this.isStreakMode && this.guessHistory.length >= maxGuesses && !isCorrectGuess) {
+            this.handleIncorrectGuess();
+            return;
+        }
         const characterName = this.characterSelector.findCharacterName(guess);
         if (!characterName) {
             alert('Character not found! Please check the spelling or use the autocomplete suggestions.');
@@ -831,6 +856,9 @@ export default class GameApp {
         this.timerManager.stopTimer();
         this.gameStarted = false;
         
+        if (this.isStreakMode) {
+            this.previousWinner = this.chosenCharacter.name;
+        }
         let roundPoints = 0;
         if (this.isStreakMode) {
             this.streakCount++;
@@ -973,7 +1001,7 @@ export default class GameApp {
             playAgainButton.parentNode.insertBefore(continueButton, playAgainButton);
         }
     }
-
+    
     handleIncorrectGuess() {
         if (this.isStreakMode) {
             this.endStreak();
@@ -1082,7 +1110,7 @@ export default class GameApp {
                 this.leaderboardManager.showNamePrompt(this.streakCount, this.streakDifficulty, this.totalPoints);
             }
         }
-        
+        this.previousWinner = null;
         this.resetStreakMode();
     }
 
@@ -1151,7 +1179,8 @@ export default class GameApp {
         this.resultsManager.clearResults();
         this.scrambleUI.removeScrambleUI();
         this.scrambleManager.reset();
-        
+        this.previousWinner = null;
+
         if (this.discordManager.connected) {
             this.discordManager.clearGuesses();
         }
