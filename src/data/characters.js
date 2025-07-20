@@ -89,7 +89,7 @@ export const names = {
     "Burgess": ["M","Blackbeard Pirates","Paramecia","3","20000000","355","Grand Line","12","Alive","E","First Mate","https://onepiece.fandom.com/wiki/Burgess"],
     "Doc Q": ["M","Blackbeard Pirates","Paramecia","0","72000000","342","North Blue","12","Alive","E","Doctor","https://onepiece.fandom.com/wiki/Doc_Q"],
     "Laffitte": ["M","Blackbeard Pirates","Unknown","0","42200000","340","West Blue","12","Alive","E","Chief of Staff","https://onepiece.fandom.com/wiki/Laffitte"],
-    "Stronger ": ["M","Blackbeard Pirates","Zoan","0","0","-1","Grand Line","12","Alive","E","Pet","https://onepiece.fandom.com/wiki/Stronger_"],
+    "Stronger": ["M","Blackbeard Pirates","Zoan","0","0","-1","Grand Line","12","Alive","E","Pet","https://onepiece.fandom.com/wiki/Stronger"],
     "Teach": ["M","Blackbeard Pirates","Unknown","3","3996000000","344","Grand Line","12","Alive","E","Commodore","https://onepiece.fandom.com/wiki/Teach"],
     "Van Augur": ["M","Blackbeard Pirates","Paramecia","0","64000000","340","East Blue","12","Alive","E","Sharpshooter","https://onepiece.fandom.com/wiki/Van_Augur"],
     "Ju Peter": ["M","Celestial Dragons","Zoan","1","0","-1","Red Line","12","Alive","E","God","https://onepiece.fandom.com/wiki/Ju_Peter"],
