@@ -326,6 +326,7 @@ export default class GameApp {
         document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
         document.getElementById('skip-button')?.addEventListener('click', () => this.skipCharacter());
         document.getElementById('quit-daily-button')?.addEventListener('click', () => this.quitDailyGame());
+        document.getElementById('mute-button')?.addEventListener('click', () => this.toggleMute());
         document.getElementById('play-again').addEventListener('click', () => {
             if (this.isStreakMode) {
                 this.continueStreak();
@@ -1223,6 +1224,23 @@ export default class GameApp {
         this.showGameSetup();
         
         console.log('Daily game quit, progress saved for later');
+    }
+
+    /**
+     * Toggle music mute
+     */
+    toggleMute() {
+        const muteButton = document.getElementById('mute-button');
+        if (this.musicManager.isMuted) {
+            // Restore previous volume (default to 30 if it was muted)
+            this.musicManager.setVolume(this.musicManager.unmutedVolume || 30);
+            if (muteButton) muteButton.textContent = '🔊';
+        } else {
+            // Save current volume before muting
+            this.musicManager.unmutedVolume = this.musicManager.volume;
+            this.musicManager.setVolume(0);
+            if (muteButton) muteButton.textContent = '🔇';
+        }
     }
 
     showGameSetup() {
