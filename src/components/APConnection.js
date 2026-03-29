@@ -156,14 +156,46 @@ export class APConnection {
      * Handles connection, disconnection, and status updates
      */
     setupEventListeners() {
-        // Connect and cancel button handlers
-        document.getElementById('ap-connect')?.addEventListener('click', () => this.handleConnect());
-        document.getElementById('ap-cancel')?.addEventListener('click', () => this.toggleConnectionDialog());
-        document.getElementById('other-cancel')?.addEventListener('click', () => this.toggleOtherDialog());
-        document.getElementById('ap-connect-button')?.addEventListener('click', () => {
-            this.toggleOtherDialog();
-            this.toggleConnectionDialog();
+        // Use event delegation to handle dynamically created buttons
+        document.addEventListener('click', (e) => {
+            if (e.target.id === 'ap-connect') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.handleConnect();
+            } else if (e.target.id === 'ap-cancel') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleConnectionDialog();
+            } else if (e.target.id === 'other-cancel') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleOtherDialog();
+            } else if (e.target.id === 'ap-connect-button') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleOtherDialog();
+                this.toggleConnectionDialog();
+            }
         });
+        
+        // Also try direct attachment with retry
+        const attachListeners = () => {
+            const connectBtn = document.getElementById('ap-connect');
+            if (connectBtn && !connectBtn.hasListener) {
+                console.log('[APConnection] Found ap-connect button, attaching direct listener');
+                connectBtn.addEventListener('click', () => {
+                    console.log('[APConnection] Connect button clicked directly');
+                    this.handleConnect();
+                });
+                connectBtn.hasListener = true;
+            } else if (connectBtn) {
+                console.log('[APConnection] ap-connect button already has listener');
+            } else {
+                console.log('[APConnection] ap-connect button not found yet, retrying in 100ms');
+                setTimeout(attachListeners, 100);
+            }
+        };
+        attachListeners();
 
         // AP client event handlers
         apClient.on('connected', () => {
@@ -257,13 +289,19 @@ export class APConnection {
      * Validates input and initiates connection to AP server
      */
     async handleConnect() {
-        const address = document.getElementById('ap-address')?.value;
-        const port = parseInt(document.getElementById('ap-port')?.value || '38281');
-        const slot = document.getElementById('ap-slot')?.value;
-        const password = document.getElementById('ap-password')?.value;
-        const deathLink = document.getElementById('ap-deathlink')?.checked;
+        const addressInput = document.getElementById('ap-address');
+        const portInput = document.getElementById('ap-port');
+        const slotInput = document.getElementById('ap-slot');
+        const passwordInput = document.getElementById('ap-password');
+        const deathLinkInput = document.getElementById('ap-deathlink');
+        
+        const address = addressInput?.value || 'archipelago.gg';
+        const port = parseInt(portInput?.value || '38281');
+        const slot = slotInput?.value;
+        const password = passwordInput?.value || '';
+        const deathLink = deathLinkInput?.checked || false;
 
-        if (!slot) {
+        if (!slot || slot.trim() === '') {
             this.showStatus('Please enter a slot name', 'error');
             return;
         }

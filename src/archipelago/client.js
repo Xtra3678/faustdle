@@ -15,7 +15,9 @@ class FaustdleAPClient extends EventEmitter {
         this.hints = [];
         this.gameMode = null;
         this.slot = null;
+        this.password = '';
         this.hostName = '';
+        this.effectivePort = 38281;
         this.players = new Map();
         this.slotData = null;
         this.dataPackage = null;
@@ -43,6 +45,61 @@ class FaustdleAPClient extends EventEmitter {
     }
 
     /**
+     * Attempts a simple connection to diagnose issues
+     * @param {string} hostname - Server hostname
+     * @param {number} port - Server port
+     * @returns {Promise<Object>} Diagnostic results
+     */
+    async diagnoseConnection(hostname, port) {
+        const diagnostics = {
+            pageProtocol: window.location.protocol,
+            hostname: hostname,
+            port: port,
+            wsProtocol: window.location.protocol === 'https:' ? 'wss:' : 'ws:',
+            timestamp: new Date().toISOString(),
+            results: {}
+        };
+        
+        this.log('Running connection diagnostics...', diagnostics);
+        
+        // Test 1: Check if https page is trying to use ws
+        if (window.location.protocol === 'https:' && port === 80) {
+            diagnostics.results.httpsToWsWarning = 'WARNING: HTTPS page cannot connect to unsecured WS on port 80. Need WSS or different port.';
+        }
+        
+        // Test 2: Check if hostname might be invalid
+        if (hostname === 'archipelago.gg') {
+            diagnostics.results.archipelagoGgNote = 'Note: archipelago.gg may not be a direct WebSocket server. You may need a specific server address.';
+        }
+        
+        // Test 3: Attempt a quick connection
+        const testUrl = window.location.protocol === 'https:' ? 
+            `wss://${hostname}:${port}` : 
+            `ws://${hostname}:${port}`;
+        
+        diagnostics.results.attemptUrl = testUrl;
+        
+        this.log('Diagnostics complete:', diagnostics);
+        return diagnostics;
+    }
+
+    /**
+     * Generates a UUID, with fallback for environments without crypto.randomUUID
+     * @returns {string} UUID string
+     */
+    generateUUID() {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            return crypto.randomUUID();
+        }
+        // Fallback UUID generation
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    /**
      * Constructs the WebSocket URL based on the environment
      * @param {string} hostname - Server hostname
      * @param {number} port - Server port
@@ -54,11 +111,13 @@ class FaustdleAPClient extends EventEmitter {
         
         if (this.isDiscordActivity) {
             // For Discord activities, use the full Discord proxy URL with /proxy prefix
-            return `wss://${this.discordAppId}.discordsays.com/proxy/:${port}`;
+            const url = `wss://${this.discordAppId}.discordsays.com/proxy/:${port}`;
+            this.log('Discord activity URL:', url);
+            return url;
         } else {
-            // For regular web usage
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            return `${protocol}//${cleanHostname}:${port}`;
+            // Always use WSS (secure WebSocket) for better compatibility
+            const url = `wss://${cleanHostname}:${port}`;
+            return url;
         }
     }
 
@@ -88,7 +147,9 @@ class FaustdleAPClient extends EventEmitter {
             }
 
             this.slot = slot;
+            this.password = password;
             this.hostName = hostname;
+            this.effectivePort = effectivePort;
             this.deathLinkEnabled = deathLink;
 
             const wsUrl = this.constructWebSocketUrl(hostname, effectivePort);
@@ -147,7 +208,7 @@ class FaustdleAPClient extends EventEmitter {
                     
                     this.socket.onerror = (error) => {
                         this.log('WebSocket error:', error);
-                        this.emit('connection_error', ['Connection error occurred']);
+                        this.emit('connection_error', ['Connection to Archipelago server failed. Please check the server address and port.']);
                         resolve(false);
                     };
                     
@@ -218,16 +279,16 @@ class FaustdleAPClient extends EventEmitter {
                     cmd: 'Connect',
                     game: '',
                     name: this.slot,
-                    uuid: crypto.randomUUID(),
+                    uuid: this.generateUUID(),
                     version: {
-                        major: 1,
-                        minor: 1,
-                        build: 1,
+                        major: 0,
+                        minor: 5,
+                        build: 0,
                         class: 'Version'
                     },
                     items_handling: 0b000,
                     tags: tags,
-                    password: ''
+                    password: this.password || ''
                 });
                 break;
 
