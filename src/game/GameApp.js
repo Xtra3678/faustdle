@@ -133,7 +133,8 @@ export default class GameApp {
         try {
             await this.initializeSupabase();
             await this.initializeDiscord();
-            await this.initializeMusic();
+            // Initialize music without blocking - music loads in the background
+            this.initializeMusic();
             this.setupEventListeners();
             this.setupUI();
             this.uiManager.updateDailyCountdown();
@@ -324,6 +325,7 @@ export default class GameApp {
         // Game controls
         document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
         document.getElementById('skip-button')?.addEventListener('click', () => this.skipCharacter());
+        document.getElementById('quit-daily-button')?.addEventListener('click', () => this.quitDailyGame());
         document.getElementById('play-again').addEventListener('click', () => {
             if (this.isStreakMode) {
                 this.continueStreak();
@@ -438,10 +440,14 @@ export default class GameApp {
             // Show game UI
             this.showGamePlay();
             
-            // Hide skip button for daily mode
+            // Hide skip button and show quit button for daily mode
             const skipButton = document.getElementById('skip-button');
+            const quitDailyButton = document.getElementById('quit-daily-button');
             if (skipButton) {
                 skipButton.style.display = 'none';
+            }
+            if (quitDailyButton) {
+                quitDailyButton.style.display = 'inline-block';
             }
 
             // Restore previous guesses to the UI
@@ -728,12 +734,16 @@ export default class GameApp {
             
             // Handle skip button visibility
             const skipButton = document.getElementById('skip-button');
+            const quitDailyButton = document.getElementById('quit-daily-button');
             if (skipButton) {
                 if (mode === 'daily') {
                     skipButton.style.display = 'none';
                 } else {
                     skipButton.style.display = 'inline-flex';
                 }
+            }
+            if (quitDailyButton) {
+                quitDailyButton.style.display = mode === 'daily' ? 'inline-flex' : 'none';
             }
 
             // Save initial progress for daily mode
@@ -1175,6 +1185,8 @@ export default class GameApp {
         this.gameStarted = false;
         this.isScrambleMode = false;
         this.scrambleDifficulty = 'normal';
+        this.gameMode = 'normal';
+        window.gameMode = 'normal';
         this.timerManager.reset();
         this.resultsManager.clearResults();
         this.scrambleUI.removeScrambleUI();
@@ -1189,6 +1201,28 @@ export default class GameApp {
         if (this.musicManager.isEasterEggMode) {
             this.musicManager.deactivateEasterEggMode();
         }
+    }
+
+    /**
+     * Quit the daily game without finishing it, but save the progress
+     */
+    quitDailyGame() {
+        // Save the current game state so it can be restored when returning to daily
+        this.saveDailyChallengeCache({
+            character: { name: this.chosenCharacter, traits: names[this.chosenCharacter] },
+            guessHistory: this.guessHistory,
+            startTime: this.timerManager.startTime,
+            inProgress: true,
+            completed: false
+        });
+        
+        // Reset game state
+        this.resetGame();
+        
+        // Return to main menu
+        this.showGameSetup();
+        
+        console.log('Daily game quit, progress saved for later');
     }
 
     showGameSetup() {

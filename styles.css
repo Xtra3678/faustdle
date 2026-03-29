@@ -31,7 +31,7 @@ body {
   margin: 0;
   padding: 2rem;
   font-family: system-ui, -apple-system, sans-serif;
-  background-image: url(bgfaustdle.png);
+  background-image: url(bgfaustdle-lr.webp);
   background-size:cover;
   background-color: var(--background-color);
   color: var(--text-color);
@@ -40,6 +40,11 @@ body {
   justify-content: center;
   align-items: flex-start;
   text-shadow: var(--text-shadow-light);
+  transition: background-image 0.5s ease-in-out;
+}
+
+body.bg-loaded {
+  background-image: url(bgfaustdle.png);
 }
 
 .container {
