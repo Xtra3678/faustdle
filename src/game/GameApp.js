@@ -751,6 +751,7 @@ export default class GameApp {
             this.showGamePlay();
             this.resultsManager.clearResults();
             this.scrambleUI.removeScrambleUI();
+            this.timerManager.startTime = Date.now();
             this.timerManager.startTimer();
             this.gameStarted = true;
             
@@ -779,12 +780,13 @@ export default class GameApp {
                 });
             }
 
-            // Update Discord activity
+            // Update Discord activity with max guesses for this mode
             if (this.discordManager.connected) {
+                const maxGuesses = this.getMaxGuessesForMode(mode);
                 if (isStreak) {
                     this.discordManager.updateStreakActivity(mode, this.streakCount);
                 } else {
-                    this.discordManager.updateGameActivity(mode, 0);
+                    this.discordManager.updateGameActivity(mode, 0, maxGuesses);
                 }
             }
             
@@ -826,6 +828,12 @@ export default class GameApp {
         }
         
         guessInput.value = '';
+        
+        // Update Discord activity with current guess count
+        if (this.discordManager.connected && this.gameStarted) {
+            const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
+            this.discordManager.updateGameActivity(this.gameMode, this.guessHistory.length, maxGuesses);
+        }
     }
 
     handleScrambleGuess(guess) {
@@ -895,6 +903,26 @@ export default class GameApp {
         this.timerManager.stopTimer();
         this.gameStarted = false;
         
+        const completionTime = this.timerManager.getElapsedTime();
+        const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
+        
+        // Update Discord activity for game win
+        if (this.discordManager.connected) {
+            if (this.isStreakMode) {
+                let roundPoints = 0;
+                if (this.isScrambleMode) {
+                    roundPoints = 1;
+                } else if (this.streakDifficulty === 'normal') {
+                    roundPoints = Math.max(1, 6 - this.guessHistory.length);
+                } else {
+                    roundPoints = Math.max(1, 8 - this.guessHistory.length);
+                }
+                this.discordManager.updateStreakWon(this.gameMode, this.streakCount + 1, roundPoints, this.totalPoints + roundPoints, completionTime);
+            } else {
+                this.discordManager.updateGameWon(this.gameMode, this.guessHistory.length, maxGuesses, completionTime);
+            }
+        }
+        
         if (this.isStreakMode) {
             this.previousWinner = this.chosenCharacter;
         }
@@ -924,8 +952,6 @@ export default class GameApp {
         
         document.getElementById('emoji-grid').textContent = emojiGrid;
         this.resultsManager.copyResultsTable();
-        
-        const completionTime = this.timerManager.getElapsedTime();
         
         if (this.gameMode === 'daily') {
             // Ensure window.gameMode is set for daily mode
@@ -1062,6 +1088,14 @@ export default class GameApp {
             this.timerManager.stopTimer();
             this.gameStarted = false;
             
+            const completionTime = this.timerManager.getElapsedTime();
+            const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
+            
+            // Update Discord activity for game loss
+            if (this.discordManager.connected) {
+                this.discordManager.updateGameLost(this.gameMode, maxGuesses, this.chosenCharacter, completionTime);
+            }
+            
             let emojiGrid;
             if (this.isScrambleMode) {
                 emojiGrid = '🟥'; // Single red square for incorrect scramble guess
@@ -1072,7 +1106,6 @@ export default class GameApp {
             document.getElementById('emoji-grid').textContent = emojiGrid;
             this.resultsManager.copyResultsTable();
             
-            const completionTime = this.timerManager.getElapsedTime();
             let message = 'Game Over! Better luck next time!';
             if (this.isScrambleMode) {
                 message = this.scrambleUI.showScrambleGameOver(false, this.chosenCharacter);
@@ -1107,6 +1140,14 @@ export default class GameApp {
         this.timerManager.stopTimer();
         this.gameStarted = false;
         
+        const completionTime = this.timerManager.getElapsedTime();
+        const maxGuesses = this.getMaxGuessesForMode(this.streakDifficulty);
+        
+        // Update Discord activity for streak loss
+        if (this.discordManager.connected) {
+            this.discordManager.updateGameLost(this.streakDifficulty, maxGuesses, this.chosenCharacter, completionTime);
+        }
+        
         // Send death link if connected and enabled
         if (apClient.isConnected() && apClient.isDeathLinkEnabled()) {
             apClient.sendDeathLink(`Streak ended at ${this.streakCount}`);
@@ -1121,8 +1162,6 @@ export default class GameApp {
         
         document.getElementById('emoji-grid').textContent = emojiGrid;
         this.resultsManager.copyResultsTable();
-        
-        const completionTime = this.timerManager.getElapsedTime();
         
         this.uiManager.showGameOver(
             `Streak ended at ${this.streakCount}!`,
@@ -1171,6 +1210,14 @@ export default class GameApp {
             this.timerManager.stopTimer();
             this.gameStarted = false;
             
+            const completionTime = this.timerManager.getElapsedTime();
+            const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
+            
+            // Update Discord activity for skip
+            if (this.discordManager.connected) {
+                this.discordManager.updateGameLost(this.gameMode, maxGuesses, this.chosenCharacter, completionTime);
+            }
+            
             let emojiGrid;
             if (this.isScrambleMode) {
                 emojiGrid = '🟥'; // Single red square for skipped scramble
@@ -1181,7 +1228,6 @@ export default class GameApp {
             document.getElementById('emoji-grid').textContent = emojiGrid;
             this.resultsManager.copyResultsTable();
             
-            const completionTime = this.timerManager.getElapsedTime();
             const message = isDeathLink ? 'Death Link received! Game Over!' : 'You gave up! Better luck next time!';
             
             this.uiManager.showGameOver(

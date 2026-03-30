@@ -5,9 +5,6 @@ import { EventEmitter } from '../utils/events.js';
  * Handles WebSocket communication, game state, and hint management
  */
 class FaustdleAPClient extends EventEmitter {
-    /**
-     * Initializes the Archipelago client with default state
-     */
     constructor() {
         super();
         this.socket = null;
@@ -103,7 +100,7 @@ class FaustdleAPClient extends EventEmitter {
     }
 
     /**
-     * Constructs the WebSocket URL based on the environment
+     * Constructs the WebSocket URL for connecting to Archipelago server
      * @param {string} hostname - Server hostname
      * @param {number} port - Server port
      * @returns {string} WebSocket URL
@@ -112,16 +109,9 @@ class FaustdleAPClient extends EventEmitter {
         // Remove any protocol prefix and trailing slashes
         const cleanHostname = hostname.replace(/^(ws|wss|http|https):\/\//, '').replace(/\/$/, '');
         
-        if (this.isDiscordActivity) {
-            // For Discord activities, use the full Discord proxy URL with /proxy prefix
-            const url = `wss://${this.discordAppId}.discordsays.com/proxy/:${port}`;
-            this.log('Discord activity URL:', url);
-            return url;
-        } else {
-            // Always use WSS (secure WebSocket) for better compatibility
-            const url = `wss://${cleanHostname}:${port}`;
-            return url;
-        }
+        // Connect directly to Archipelago server
+        const url = `wss://${cleanHostname}:${port}`;
+        return url;
     }
 
     /**
@@ -135,6 +125,13 @@ class FaustdleAPClient extends EventEmitter {
      * @returns {Promise<boolean>} True if connection successful, false otherwise
      */
     async connect(hostname, port, slot, password = '', deathLink = false, deathLinkGroup = '') {
+        // Archipelago connections not yet supported in Discord Activity due to CSP restrictions
+        if (this.isDiscordActivity) {
+            this.emit('connection_status', 'Archipelago connections are not yet available in Discord Activity mode. Play the normal game instead!');
+            this.log('Skipping Archipelago connection in Discord Activity mode');
+            return false;
+        }
+
         try {
             hostname = hostname?.trim().toLowerCase() || '';
             if (!hostname) {

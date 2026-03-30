@@ -66,8 +66,17 @@ export class DiscordProxy {
             // Parse the original Supabase URL
             const originalUrl = new URL(url);
             
+            // Extract API key from environment or URL
+            const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+            
             // Extract everything after the domain (path + query + hash)
-            const pathAndQuery = originalUrl.pathname + originalUrl.search + originalUrl.hash;
+            let pathAndQuery = originalUrl.pathname + originalUrl.search + originalUrl.hash;
+            
+            // Ensure apikey is in query params for Supabase
+            if (!pathAndQuery.includes('apikey=')) {
+                const separator = pathAndQuery.includes('?') ? '&' : '?';
+                pathAndQuery += `${separator}apikey=${supabaseAnonKey}`;
+            }
             
             // Build the proxy URL using Discord's proxy format
             // This maps to: Target: /.proxy/supabase, Prefix: https://qrprexuziojupqvvdefy.supabase.co/
@@ -83,12 +92,18 @@ export class DiscordProxy {
                 'X-Discord-Proxy': 'true'
             };
 
-            // Handle Supabase authentication headers
+            // Add Supabase API key to headers as backup
+            if (supabaseAnonKey) {
+                proxyHeaders['apikey'] = supabaseAnonKey;
+            }
+
+            // Handle any additional headers from options
             if (options.headers) {
-                // Copy over important headers
+                // Copy over important headers from the original request
                 Object.keys(options.headers).forEach(key => {
                     const lowerKey = key.toLowerCase();
-                    if (lowerKey === 'authorization' || lowerKey === 'apikey' || lowerKey === 'prefer') {
+                    // Skip content-type as we already set it
+                    if (lowerKey !== 'content-type' && lowerKey !== 'host') {
                         proxyHeaders[key] = options.headers[key];
                     }
                 });
@@ -116,7 +131,7 @@ export class DiscordProxy {
             });
             
             if (!response.ok) {
-                const errorText = await response.text();
+                const errorText = await response.text().catch(() => '');
                 console.error('Proxy response error:', errorText);
                 throw new Error(`Proxy request failed: ${response.status} ${response.statusText} - ${errorText}`);
             }

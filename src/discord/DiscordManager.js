@@ -190,13 +190,12 @@ export class DiscordManager {
         }
     }
 
-    async updateGameActivity(mode, guessCount) {
+    async updateGameActivity(mode, guessCount, maxGuesses = 6) {
         if (!this.connected || !this.sdk) return;
 
         this.currentMode = mode;
         const modeText = this.getModeText(mode);
-        const guessText = this.getGuessText(guessCount);
-        const emojiGrid = this.generateEmojiGrid();
+        const guessText = this.getGuessText(guessCount, maxGuesses);
         const elapsedTime = this.getElapsedTimeText();
 
         try {
@@ -206,7 +205,7 @@ export class DiscordManager {
                     state: `Time: ${elapsedTime}`,
                     assets: {
                         large_image: 'faustdle',
-                        large_text: emojiGrid || 'No guesses yet',
+                        large_text: 'Playing Faustdle',
                         small_image: mode.toLowerCase(),
                         small_text: modeText
                     },
@@ -261,8 +260,8 @@ export class DiscordManager {
         }
     }
 
-    getGuessText(guessCount) {
-        return `Guesses: ${guessCount}`;
+    getGuessText(guessCount, maxGuesses = 6) {
+        return `${guessCount}/${maxGuesses} Guesses`;
     }
 
     generateEmojiGrid() {
@@ -285,6 +284,100 @@ export class DiscordManager {
         }
     }
 
+    /**
+     * Update Discord activity when player wins
+     */
+    async updateGameWon(mode, guessCount, maxGuesses, elapsedTime) {
+        if (!this.connected || !this.sdk) return;
+
+        const modeText = this.getModeText(mode);
+        const guessText = this.getGuessText(guessCount, maxGuesses);
+
+        try {
+            await this.sdk.commands.setActivity({
+                activity: {
+                    details: `${modeText} - Won! ${guessText}`,
+                    state: `Time: ${elapsedTime}`,
+                    assets: {
+                        large_image: 'faustdle',
+                        large_text: '✅ Challenge Complete!',
+                        small_image: mode.toLowerCase(),
+                        small_text: modeText
+                    },
+                    timestamps: {
+                        start: this.startTimestamp
+                    },
+                    instance: false
+                }
+            });
+        } catch (error) {
+            console.warn('Failed to update win activity:', error);
+        }
+    }
+
+    /**
+     * Update Discord activity when player loses
+     */
+    async updateGameLost(mode, maxGuesses, correctCharacter, elapsedTime) {
+        if (!this.connected || !this.sdk) return;
+
+        const modeText = this.getModeText(mode);
+
+        try {
+            await this.sdk.commands.setActivity({
+                activity: {
+                    details: `${modeText} - Game Over`,
+                    state: `The answer was: ${correctCharacter} | Time: ${elapsedTime}`,
+                    assets: {
+                        large_image: 'faustdle',
+                        large_text: `❌ Out of Guesses (0/${maxGuesses})`,
+                        small_image: mode.toLowerCase(),
+                        small_text: modeText
+                    },
+                    timestamps: {
+                        start: this.startTimestamp
+                    },
+                    instance: false
+                }
+            });
+        } catch (error) {
+            console.warn('Failed to update loss activity:', error);
+        }
+    }
+
+    /**
+     * Update Discord activity for streak mode completion
+     */
+    async updateStreakWon(mode, streak, points, totalPoints, elapsedTime) {
+        if (!this.connected || !this.sdk) return;
+
+        const modeText = this.getModeText(mode);
+
+        try {
+            await this.sdk.commands.setActivity({
+                activity: {
+                    details: `${modeText} Streak - Round Complete!`,
+                    state: `Streak: ${streak} | Points: +${points} (Total: ${totalPoints}) | Time: ${elapsedTime}`,
+                    assets: {
+                        large_image: 'faustdle',
+                        large_text: '🔥 Streak Continuing!',
+                        small_image: 'streak',
+                        small_text: `Streak: ${streak}`
+                    },
+                    timestamps: {
+                        start: this.startTimestamp
+                    },
+                    instance: false
+                }
+            });
+        } catch (error) {
+            console.warn('Failed to update streak activity:', error);
+        }
+    }
+
+    /**
+     * Reset to default activity
+     */
     clearGuesses() {
         this.guessHistory = [];
         this.setDefaultActivity();

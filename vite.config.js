@@ -4,6 +4,7 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
+    middlewareMode: false,
     proxy: {
       '/archipelago': {
         target: 'ws://localhost:38281',
@@ -11,6 +12,7 @@ export default defineConfig({
       }
     }
   },
+  plugins: [],
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

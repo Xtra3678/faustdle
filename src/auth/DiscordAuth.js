@@ -50,58 +50,72 @@ export class DiscordAuth {
      */
     async authenticateWithDiscord() {
         try {
-            // Get Discord user info first
-            const discordUser = await this.discordSDK.commands.getUser();
-            if (!discordUser) {
-                throw new Error('Failed to get Discord user');
+            console.log('Starting Discord authentication flow...');
+            
+            // Step 1: Request authorization from Discord with required scopes
+            const { code } = await this.discordSDK.commands.authorize({
+                client_id: this.discordClientId,
+                response_type: 'code',
+                state: '',
+                prompt: 'none',
+                scope: ['identify', 'guilds']
+            });
+
+            console.log('Authorization code received, exchanging for access token via backend...');
+
+            // Step 2: Exchange authorization code for access token via backend
+            // For now, use a placeholder backend URL - in production, this should be your backend
+            const tokenResponse = await fetch('/.proxy/api/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ code })
+            }).catch(async (error) => {
+                console.warn('Backend token exchange failed, falling back to anonymous session:', error);
+                // Fallback for development without backend
+                return null;
+            });
+
+            let access_token = null;
+            if (tokenResponse && tokenResponse.ok) {
+                const tokenData = await tokenResponse.json();
+                access_token = tokenData.access_token;
             }
 
-            console.log('Discord user obtained:', discordUser.username);
-
-            // In Discord activities, we can't use OAuth redirects due to CSP
-            // So we'll create an anonymous session with Discord user data
-            if (this.isDiscordActivity) {
-                return await this.createAnonymousSession();
-            }
-
-            // Try Supabase Discord OAuth for non-Discord environments
-            try {
-                const { data, error } = await this.supabase.auth.signInWithOAuth({
-                    provider: 'discord',
-                    options: {
-                        redirectTo: this.redirectUri,
-                        scopes: 'identify email'
-                    }
+            // Step 3: Authenticate with Discord using the access token
+            let authResponse = null;
+            if (access_token) {
+                authResponse = await this.discordSDK.commands.authenticate({
+                    access_token
                 });
+                console.log('Discord authentication successful with access token');
+            } else {
+                console.log('No access token available, using anonymous session');
+            }
 
-                if (error) {
-                    throw error;
-                }
-
-                // This will redirect, so we won't reach here in normal flow
-                console.log('Discord OAuth initiated');
-                return true;
-            } catch (oauthError) {
-                console.warn('Discord OAuth failed, trying alternative method:', oauthError);
-                
+            // Step 4: Create Supabase session with Discord user data
+            if (authResponse && authResponse.user) {
+                // Authenticated with Discord token
+                return await this.createAuthenticatedSession(authResponse.user, access_token);
+            } else {
                 // Fallback to anonymous session
+                console.log('Falling back to anonymous session');
                 return await this.createAnonymousSession();
             }
         } catch (error) {
             console.error('Discord authentication failed:', error);
             
-            // Fallback: create anonymous session with Discord user data
+            // Fallback: create anonymous session
             return await this.createAnonymousSession();
         }
     }
 
     /**
-     * Create an anonymous session for Discord users when OAuth fails
+     * Create an authenticated session using Discord user info
      */
-    async createAnonymousSession() {
+    async createAuthenticatedSession(discordUser, accessToken) {
         try {
-            const discordUser = await this.discordSDK.commands.getUser();
-            
             // Sign in anonymously with Discord user metadata
             const { data, error } = await this.supabase.auth.signInAnonymously({
                 options: {
@@ -113,6 +127,60 @@ export class DiscordAuth {
                         avatar_url: discordUser.avatar ? 
                             `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png` : 
                             null,
+                        provider: 'discord_sdk',
+                        access_token: accessToken
+                    }
+                }
+            });
+
+            if (error) {
+                throw error;
+            }
+
+            this.session = data.session;
+            this.user = data.user;
+            this.isAuthenticated = true;
+
+            console.log('Authenticated session created for Discord user:', discordUser.username);
+            return true;
+        } catch (error) {
+            console.error('Failed to create authenticated session:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Create an anonymous session for Discord users when OAuth fails
+     */
+    async createAnonymousSession() {
+        try {
+            // For anonymous sessions in Discord Activity, try to get basic user context
+            let discordUserData = null;
+            
+            try {
+                // Try to get user from SDK if available - might fail if auth not set up
+                // This is optional and only works if SDK is authenticated
+                const discordUser = await this.discordSDK.commands.getUserId?.();
+                if (discordUser) {
+                    discordUserData = discordUser;
+                }
+            } catch (e) {
+                console.log('Could not get Discord user context for anonymous session:', e);
+            }
+
+            // Sign in anonymously
+            const { data, error } = await this.supabase.auth.signInAnonymously({
+                options: {
+                    data: {
+                        ...(discordUserData && {
+                            discord_id: discordUserData.id,
+                            discord_username: discordUserData.username,
+                            discord_discriminator: discordUserData.discriminator,
+                            discord_global_name: discordUserData.global_name,
+                            avatar_url: discordUserData.avatar ? 
+                                `https://cdn.discordapp.com/avatars/${discordUserData.id}/${discordUserData.avatar}.png` : 
+                                null,
+                        }),
                         provider: 'discord_anonymous'
                     }
                 }
@@ -126,7 +194,7 @@ export class DiscordAuth {
             this.user = data.user;
             this.isAuthenticated = true;
 
-            console.log('Anonymous session created with Discord data for user:', discordUser.username);
+            console.log('Anonymous session created');
             return true;
         } catch (error) {
             console.error('Failed to create anonymous session:', error);
