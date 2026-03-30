@@ -779,13 +779,6 @@ export default class GameApp {
                 });
             }
 
-            if (this.isStreakMode && this.previousWinner) {
-                setTimeout(() => {
-                    const results = compareTraits(names[this.previousWinner], this.chosenCharacter.traits);
-                    this.results.displayResults(this.previousWinner, results);
-                    this.guessHistory.push({ name: this.previousWinner, results });
-                }, 100);
-            }
             // Update Discord activity
             if (this.discordManager.connected) {
                 if (isStreak) {
@@ -820,11 +813,6 @@ export default class GameApp {
         
         if (!guess) return;
         
-        const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
-        if (this.isStreakMode && this.guessHistory.length >= maxGuesses && !isCorrectGuess) {
-            this.handleIncorrectGuess();
-            return;
-        }
         const characterName = this.characterSelector.findCharacterName(guess);
         if (!characterName) {
             alert('Character not found! Please check the spelling or use the autocomplete suggestions.');
@@ -892,6 +880,12 @@ export default class GameApp {
             return;
         }
         
+        // Check if max guesses exceeded in streak mode
+        if (this.isStreakMode && this.guessHistory.length >= maxGuesses && characterName !== this.chosenCharacter) {
+            this.handleIncorrectGuess();
+            return;
+        }
+        
         if (characterName === this.chosenCharacter) {
             this.handleCorrectGuess();
         }
@@ -902,7 +896,7 @@ export default class GameApp {
         this.gameStarted = false;
         
         if (this.isStreakMode) {
-            this.previousWinner = this.chosenCharacter.name;
+            this.previousWinner = this.chosenCharacter;
         }
         let roundPoints = 0;
         if (this.isStreakMode) {
@@ -1104,25 +1098,6 @@ export default class GameApp {
         
         if (this.streakDifficulty === 'scramble') {
             this.startScrambleGame(this.scrambleDifficulty, true);
-        
-        // Auto-submit the previous character as first guess for non-scramble streak mode
-        if (!this.isScrambleMode) {
-            setTimeout(() => {
-                const guessInput = document.getElementById('guess-input');
-                if (guessInput && this.previousStreakCharacter) {
-                    guessInput.value = this.previousStreakCharacter;
-                    this.makeGuess();
-                }
-            }, 100);
-        }
-        
-        // Auto-submit previous character as first guess (non-scramble mode only)
-        if (!this.isScrambleMode && this.previousStreakCharacter) {
-            // Small delay to ensure UI is ready
-            setTimeout(() => {
-                this.makeGuess(this.previousStreakCharacter);
-            }, 100);
-        }
         } else {
             this.startGame(this.streakDifficulty, null, true);
         }
@@ -1306,26 +1281,16 @@ export default class GameApp {
         document.getElementById('game-over').classList.add('hidden');
         
         // Auto-submit previous character as first guess in streak mode (round 2+)
-        if (this.isStreakMode && this.previousStreakCharacter && !this.isScrambleMode) {
+        if (this.isStreakMode && this.previousWinner && !this.isScrambleMode) {
             setTimeout(() => {
                 const guessInput = document.getElementById('guess-input');
                 if (guessInput) {
-                    guessInput.value = this.previousStreakCharacter;
+                    guessInput.value = this.previousWinner;
                     this.makeGuess();
                 }
-            }, 100);
+            }, 200);
         }
         
-        // Auto-submit previous character as first guess in non-scramble streak mode
-        if (this.isStreakMode && this.previousStreakCharacter && !this.isScrambleMode) {
-            setTimeout(() => {
-                const guessInput = document.getElementById('guess-input');
-                if (guessInput) {
-                    guessInput.value = this.previousStreakCharacter;
-                    this.makeGuess();
-                }
-            }, 100);
-        }
         document.getElementById('seed-generator').classList.add('hidden');
         document.getElementById('archipelago-setup').classList.add('hidden');
         
