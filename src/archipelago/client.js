@@ -19,6 +19,8 @@ class FaustdleAPClient extends EventEmitter {
         this.hostName = '';
         this.effectivePort = 38281;
         this.players = new Map();
+        this.player_names = {};  // Maps slot ID to player name
+        this.slot_info = {};      // Maps slot ID to {game, name, type, group_members}
         this.slotData = null;
         this.dataPackage = null;
         this.debug = true;
@@ -30,6 +32,7 @@ class FaustdleAPClient extends EventEmitter {
         this.locationFlags = new Map();
         this.sentHints = new Set();
         this.deathLinkEnabled = false;
+        this.deathLinkGroup = ''; // Empty string = no group filtering (compatible with non-group clients)
         this.isDiscordActivity = window.location.href.includes('discordsays.com');
         this.discordAppId = '1351722811718373447';
     }
@@ -128,9 +131,10 @@ class FaustdleAPClient extends EventEmitter {
      * @param {string} slot - Player slot name
      * @param {string} [password=''] - Optional server password
      * @param {boolean} [deathLink=false] - Whether to enable death link feature
+     * @param {string} [deathLinkGroup=''] - Death link group name (empty = no group filtering)
      * @returns {Promise<boolean>} True if connection successful, false otherwise
      */
-    async connect(hostname, port, slot, password = '', deathLink = false) {
+    async connect(hostname, port, slot, password = '', deathLink = false, deathLinkGroup = '') {
         try {
             hostname = hostname?.trim().toLowerCase() || '';
             if (!hostname) {
@@ -151,6 +155,7 @@ class FaustdleAPClient extends EventEmitter {
             this.hostName = hostname;
             this.effectivePort = effectivePort;
             this.deathLinkEnabled = deathLink;
+            this.deathLinkGroup = deathLinkGroup || '';
 
             const wsUrl = this.constructWebSocketUrl(hostname, effectivePort);
             this.log('Connecting to:', wsUrl);
@@ -165,7 +170,6 @@ class FaustdleAPClient extends EventEmitter {
                     this.socket = new WebSocket(wsUrl);
                     
                     this.socket.onopen = () => {
-                        this.log('WebSocket connection established');
                         this.emit('connection_status', 'Connected to server, requesting data package...');
                         this.sendRaw({ cmd: 'GetDataPackage' });
                     };
@@ -173,7 +177,6 @@ class FaustdleAPClient extends EventEmitter {
                     this.socket.onmessage = (event) => {
                         try {
                             if (!event.data) {
-                                this.log('Received empty message');
                                 return;
                             }
 
@@ -181,16 +184,12 @@ class FaustdleAPClient extends EventEmitter {
                             try {
                                 messages = JSON.parse(event.data);
                             } catch (parseError) {
-                                this.log('Failed to parse message:', event.data);
                                 return;
                             }
 
                             if (!messages) {
-                                this.log('Parsed message is null or undefined');
                                 return;
                             }
-                            
-                            this.log('Received:', messages);
                             
                             if (Array.isArray(messages)) {
                                 messages.forEach(packet => {
@@ -202,18 +201,15 @@ class FaustdleAPClient extends EventEmitter {
                                 this.handlePacket(messages);
                             }
                         } catch (error) {
-                            this.log('Error processing message:', error);
                         }
                     };
                     
                     this.socket.onerror = (error) => {
-                        this.log('WebSocket error:', error);
                         this.emit('connection_error', ['Connection to Archipelago server failed. Please check the server address and port.']);
                         resolve(false);
                     };
                     
                     this.socket.onclose = (event) => {
-                        this.log('WebSocket closed:', event);
                         this.connected = false;
                         this.emit('disconnected');
                         resolve(false);
@@ -221,12 +217,10 @@ class FaustdleAPClient extends EventEmitter {
 
                     this.once('connected', () => resolve(true));
                 } catch (error) {
-                    this.log('Socket creation error:', error);
                     resolve(false);
                 }
             });
         } catch (error) {
-            this.log('Connection setup failed:', error);
             return false;
         }
     }
@@ -237,16 +231,13 @@ class FaustdleAPClient extends EventEmitter {
      */
     sendRaw(packet) {
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-            this.log('Cannot send message: socket not ready');
             return;
         }
 
         try {
             const data = JSON.stringify([packet]);
-            this.log('Sending:', data);
             this.socket.send(data);
         } catch (error) {
-            this.log('Error sending message:', error);
         }
     }
 
@@ -272,7 +263,8 @@ class FaustdleAPClient extends EventEmitter {
                 this.dataPackage = packet.data;
                 const tags = ['HintGame','Faustdle'];
                 if (this.deathLinkEnabled) {
-                    tags.push('DeathLink');
+                    const deathLinkTag = this.getDeathLinkTag();
+                    tags.push(deathLinkTag);
                 }
                 
                 this.sendRaw({
@@ -297,11 +289,36 @@ class FaustdleAPClient extends EventEmitter {
                 if (packet.slot_data) {
                     this.slotData = packet.slot_data;
                 }
+                // Store slot_info with game information for each player
+                if (packet.slot_info) {
+                    this.slot_info = {};
+                    for (const [slotId, slotInfo] of Object.entries(packet.slot_info)) {
+                        this.slot_info[parseInt(slotId)] = slotInfo;  // {name, game, type, group_members}
+                    }
+                    this.log('Slot info:', this.slot_info);
+                }
+                // Always add Archipelago as slot 0
+                this.slot_info[0] = { name: 'Archipelago', game: 'Archipelago', type: 'player' };
+                
                 if (packet.players) {
                     this.players = new Map(Object.entries(packet.players));
+                    
+                    // Build player_names map: slot -> name (matching CommonClient.py pattern)
+                    // The hint contains slot numbers, not player IDs!
+                    this.player_names = {};
+                    this.player_names[0] = 'Archipelago';  // Server/Archipelago is always slot 0
+                    
                     for (const [id, player] of this.players) {
+                        // Map by SLOT, not by player ID dict key!
+                        this.player_names[player.slot] = player.alias || player.name || `Player ${id}`;
+                        
                         if (player.slot === this.slot) {
-                            this.connectedGame = player.game;
+                            // Get game from slot_info now instead of player.game
+                            if (this.slot_info[this.slot]) {
+                                this.connectedGame = this.slot_info[this.slot].game;
+                            } else {
+                                this.connectedGame = player.game; // fallback
+                            }
                             this.teamId = player.team;
                             this.slotId = parseInt(id);
                             this.log('Connected to game:', this.connectedGame, 'Team:', this.teamId, 'Slot:', this.slotId);
@@ -322,7 +339,6 @@ class FaustdleAPClient extends EventEmitter {
                 this.emit('connected');
                 this.scoutAllLocations();
                 break;
-
             case 'ReceivedItems':
                 if (Array.isArray(packet.items)) {
                     this.processReceivedItems(packet.items);
@@ -360,7 +376,8 @@ class FaustdleAPClient extends EventEmitter {
                 break;
 
             case 'Bounced':
-                if (packet.tags?.includes('DeathLink') && this.deathLinkEnabled) {
+                const expectedTag = this.getDeathLinkTag();
+                if (packet.tags?.includes(expectedTag) && this.deathLinkEnabled) {
                     this.handleDeathLink(packet);
                 }
                 break;
@@ -376,16 +393,22 @@ class FaustdleAPClient extends EventEmitter {
      * @param {Object} packet - Death link packet
      */
     handleDeathLink(packet) {
-        if (!packet.data) return;
+        if (!packet.data) {
+            console.warn('[AP Client] Death link packet missing data');
+            return;
+        }
         
         const deathData = packet.data;
         const source = deathData.source || 'Unknown';
-        this.log('Death link received from:', source);
+        const cause = deathData.cause || 'Unknown';
+        this.log('Death link received from:', source, 'cause:', cause);
+        console.log('[AP Client] Dispatching death_link_received event', { source, cause });
 
         // Create a custom event with the source and force skip flag
         const event = new CustomEvent('death_link_received', {
             detail: { 
                 source,
+                cause,
                 forceSkip: true // Add flag to indicate this should force a skip
             }
         });
@@ -393,21 +416,55 @@ class FaustdleAPClient extends EventEmitter {
     }
 
     /**
+     * Gets the death link tag including group suffix
+     * @returns {string} The death link tag (e.g. "DeathLink" or "DeathLinkGroupName")
+     */
+    getDeathLinkTag() {
+        return 'DeathLink' + this.deathLinkGroup;
+    }
+
+    /**
+     * Sets the death link group name
+     * @param {string} groupName - Group name (empty string for no group)
+     */
+    setDeathLinkGroup(groupName = '') {
+        this.deathLinkGroup = groupName || '';
+    }
+
+    /**
      * Sends a death link to other players
      * @param {string} [reason='Failed to guess character'] - Reason for death
      */
     sendDeathLink(reason = 'Failed to guess character') {
-        if (!this.connected || !this.deathLinkEnabled) return;
+        if (!this.connected || !this.deathLinkEnabled) {
+            return;
+        }
 
-        this.log('Sending death link');
+        const tag = this.getDeathLinkTag();
+        
         this.sendRaw({
             cmd: 'Bounce',
-            tags: ['DeathLink'],
+            tags: [tag],
             data: {
                 time: Date.now(),
                 source: this.slot,
                 reason
             }
+        });
+    }
+
+    /**
+     * Sends a chat message to other players
+     * @param {string} message - Message to send
+     */
+    sendMessage(message) {
+        if (!this.connected) {
+            return;
+        }
+
+        this.sendRaw({
+            cmd: 'Say',
+            text: message
         });
     }
 
@@ -582,6 +639,14 @@ class FaustdleAPClient extends EventEmitter {
     }
 
     /**
+     * Gets the current death link group
+     * @returns {string} The current death link group
+     */
+    getDeathLinkGroup() {
+        return this.deathLinkGroup;
+    }
+
+    /**
      * Disconnects from the server and resets state
      */
     disconnect() {
@@ -599,6 +664,7 @@ class FaustdleAPClient extends EventEmitter {
         this.locationFlags.clear();
         this.sentHints.clear();
         this.deathLinkEnabled = false;
+        this.deathLinkGroup = '';
     }
 }
 

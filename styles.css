@@ -1710,3 +1710,139 @@ label {
     font-size: 1.2rem;
   }
 }
+
+/* Console System */
+.console-container {
+  width: 100%;
+  margin-top: 2rem;
+  background: #1e1e1e;
+  border: 2px solid #404040;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: var(--transition);
+}
+
+.console-container:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.console-container.hidden {
+  display: none;
+}
+
+.console-output {
+  flex: 1;
+  height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 16px;
+  font-family: 'Courier New', 'Monaco', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #e0e0e0;
+  background: #1e1e1e;
+  scroll-behavior: smooth;
+}
+
+.console-output::-webkit-scrollbar {
+  width: 8px;
+}
+
+.console-output::-webkit-scrollbar-track {
+  background: #2d2d2d;
+}
+
+.console-output::-webkit-scrollbar-thumb {
+  background: #404040;
+  border-radius: 4px;
+}
+
+.console-output::-webkit-scrollbar-thumb:hover {
+  background: #505050;
+}
+
+.console-line {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+  word-break: break-word;
+}
+
+.console-time {
+  color: #808080;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.console-msg {
+  flex: 1;
+}
+
+/* Message type colors */
+.console-info .console-msg {
+  color: #64b5f6;
+}
+
+.console-success .console-msg {
+  color: #81c784;
+}
+
+.console-error .console-msg {
+  color: #ef5350;
+}
+
+.console-warning .console-msg {
+  color: #ffa726;
+}
+
+.console-debug .console-msg {
+  color: #ba68c8;
+}
+
+/* Highlight specific keywords in messages */
+.console-error .console-msg,
+.console-warning .console-msg {
+  font-weight: 500;
+}
+
+/* Console Input Section */
+.console-input-section {
+  padding: 8px 16px;
+  border-top: 1px solid #404040;
+  background: #252525;
+}
+
+.console-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-family: 'Courier New', 'Monaco', monospace;
+  font-size: 0.875rem;
+  background: #1e1e1e;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  color: #e0e0e0;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.console-input:focus {
+  border-color: #64b5f6;
+}
+
+.console-input::placeholder {
+  color: #808080;
+}
+
+@media (max-width: 768px) {
+  .console-output {
+    height: 150px;
+    font-size: 0.8rem;
+  }
+  
+  .console-line {
+    gap: 6px;
+  }
+}

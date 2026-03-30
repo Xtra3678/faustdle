@@ -1,4 +1,5 @@
 import { apClient } from '../archipelago/client.js';
+import { gameConsole } from './Console.js';
 
 /**
  * Manages the Archipelago connection UI and interactions
@@ -12,6 +13,8 @@ export class APConnection {
     constructor(container) {
         this.container = container;
         this.visible = false;
+        this.deathLinkState = false; // Store checkbox state separately
+        this.deathLinkGroupState = ''; // Store group name separately
         this.createUI();
         this.setupHintsDisplay();
         this.setupEventListeners();
@@ -59,36 +62,127 @@ export class APConnection {
         const dialog = document.createElement('div');
         dialog.id = 'ap-connection-dialog';
         dialog.className = 'ap-dialog hidden';
-        dialog.innerHTML = `
-            <div class="ap-dialog-content">
-                <h3>Connect to Archipelago</h3>
-                <div class="input-group">
-                    <input type="text" id="ap-address" placeholder="Server address" value="archipelago.gg">
-                </div>
-                <div class="input-group">
-                    <input type="number" id="ap-port" placeholder="Port">
-                </div>
-                <div class="input-group">
-                    <input type="text" id="ap-slot" placeholder="Slot name">
-                </div>
-                <div class="input-group">
-                    <input type="password" id="ap-password" placeholder="Password (optional)">
-                </div>
-                <div class="checkbox-group">
-                    <label>
-                        <input type="checkbox" id="ap-deathlink" unchecked>
-                        Enable Death Link
-                    </label>
-                </div>
-                <div id="ap-connection-status" class="ap-status hidden">
-                    <p class="status-message"></p>
-                </div>
-                <div class="ap-buttons">
-                    <button id="ap-connect" class="btn">Connect</button>
-                    <button id="ap-cancel" class="btn btn-secondary">Cancel</button>
-                </div>
-            </div>
-        `;
+        
+        // Create dialog content using DOM methods for better control
+        const dialogContent = document.createElement('div');
+        dialogContent.className = 'ap-dialog-content';
+        
+        // Title
+        const title = document.createElement('h3');
+        title.textContent = 'Connect to Archipelago';
+        dialogContent.appendChild(title);
+        
+        // Address input
+        const addressGroup = document.createElement('div');
+        addressGroup.className = 'input-group';
+        const addressInput = document.createElement('input');
+        addressInput.type = 'text';
+        addressInput.id = 'ap-address';
+        addressInput.placeholder = 'Server address';
+        addressInput.value = 'archipelago.gg';
+        addressGroup.appendChild(addressInput);
+        dialogContent.appendChild(addressGroup);
+        
+        // Port input
+        const portGroup = document.createElement('div');
+        portGroup.className = 'input-group';
+        const portInput = document.createElement('input');
+        portInput.type = 'number';
+        portInput.id = 'ap-port';
+        portInput.placeholder = 'Port';
+        portInput.value = '';
+        portGroup.appendChild(portInput);
+        dialogContent.appendChild(portGroup);
+        
+        // Slot input
+        const slotGroup = document.createElement('div');
+        slotGroup.className = 'input-group';
+        const slotInput = document.createElement('input');
+        slotInput.type = 'text';
+        slotInput.id = 'ap-slot';
+        slotInput.placeholder = 'Slot name';
+        slotGroup.appendChild(slotInput);
+        dialogContent.appendChild(slotGroup);
+        
+        // Password input
+        const passwordGroup = document.createElement('div');
+        passwordGroup.className = 'input-group';
+        const passwordInput = document.createElement('input');
+        passwordInput.type = 'password';
+        passwordInput.id = 'ap-password';
+        passwordInput.placeholder = 'Password (optional)';
+        passwordGroup.appendChild(passwordInput);
+        dialogContent.appendChild(passwordGroup);
+        
+        // Death Link Checkbox - Created as real DOM element
+        const checkboxGroup = document.createElement('div');
+        checkboxGroup.className = 'checkbox-group';
+        const label = document.createElement('label');
+        label.style.display = 'flex';
+        label.style.alignItems = 'center';
+        label.style.gap = '8px';
+        label.style.width = 'fit-content';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = 'ap-deathlink';
+        const labelText = document.createTextNode('Enable Death Link');
+        label.appendChild(labelText);
+        label.appendChild(checkbox);
+        checkboxGroup.appendChild(label);
+        dialogContent.appendChild(checkboxGroup);
+        
+        // Add immediate listener to checkbox right after creation
+        checkbox.addEventListener('change', (e) => {
+            this.deathLinkState = e.target.checked; // Store state in instance variable
+        });
+        checkbox.addEventListener('click', (e) => {
+            this.deathLinkState = e.target.checked; // Store state in instance variable
+        });
+        
+        // Death Link Group input
+        const groupGroup = document.createElement('div');
+        groupGroup.className = 'input-group';
+        const groupInput = document.createElement('input');
+        groupInput.type = 'text';
+        groupInput.id = 'ap-deathlink-group';
+        groupInput.placeholder = 'Death Link Group (optional)';
+        
+        // Attach listeners to store group value in instance variable
+        groupInput.addEventListener('input', (e) => {
+            this.deathLinkGroupState = e.target.value;
+        });
+        groupInput.addEventListener('change', (e) => {
+            this.deathLinkGroupState = e.target.value;
+        });
+        
+        groupGroup.appendChild(groupInput);
+        dialogContent.appendChild(groupGroup);
+        
+        // Status container
+        const statusContainer = document.createElement('div');
+        statusContainer.id = 'ap-connection-status';
+        statusContainer.className = 'ap-status hidden';
+        const statusMessage = document.createElement('p');
+        statusMessage.className = 'status-message';
+        statusContainer.appendChild(statusMessage);
+        dialogContent.appendChild(statusContainer);
+        
+        // Buttons
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'ap-buttons';
+        const connectBtn = document.createElement('button');
+        connectBtn.id = 'ap-connect';
+        connectBtn.className = 'btn';
+        connectBtn.textContent = 'Connect';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.id = 'ap-cancel';
+        cancelBtn.className = 'btn btn-secondary';
+        cancelBtn.textContent = 'Cancel';
+        buttonContainer.appendChild(connectBtn);
+        buttonContainer.appendChild(cancelBtn);
+        dialogContent.appendChild(buttonContainer);
+        
+        dialog.appendChild(dialogContent);
 
         // Create hints container
         const hintsContainer = document.createElement('div');
@@ -204,6 +298,18 @@ export class APConnection {
             if (otherButton) {
                 otherButton.style.display = 'none';
             }
+            
+            // Hide non-AP game modes
+            const dailyModeBtn = document.getElementById('daily-mode');
+            const dailyCountdown = document.getElementById('daily-countdown');
+            const seedSection = document.getElementById('seed-section');
+            const streakModeBtn = document.getElementById('streak-mode');
+            
+            if (dailyModeBtn) dailyModeBtn.style.display = 'none';
+            if (dailyCountdown) dailyCountdown.style.display = 'none';
+            if (seedSection) seedSection.style.display = 'none';
+            if (streakModeBtn) streakModeBtn.style.display = 'none';
+            
             setTimeout(() => {
                 this.toggleConnectionDialog();
             }, 1500);
@@ -211,15 +317,18 @@ export class APConnection {
 
         apClient.on('connection_error', (errors) => {
             const errorMessage = Array.isArray(errors) ? errors.join('\n') : 'Connection failed';
+            gameConsole.log(`Connection Error: ${errorMessage}`, 'error');
             this.showStatus(errorMessage, 'error');
         });
 
         apClient.on('connection_status', (message) => {
+            gameConsole.log(message, 'info');
             this.showStatus(message, 'info');
         });
 
         apClient.on('server_error', (error) => {
             const errorMessage = error.text || 'Server error occurred';
+            gameConsole.log(`Server Error: ${errorMessage}`, 'error');
             this.showStatus(errorMessage, 'error');
         });
 
@@ -229,15 +338,38 @@ export class APConnection {
             if (otherButton) {
                 otherButton.style.display = 'block';
             }
+            
+            // Show non-AP game modes
+            const dailyModeBtn = document.getElementById('daily-mode');
+            const dailyCountdown = document.getElementById('daily-countdown');
+            const seedSection = document.getElementById('seed-section');
+            const streakModeBtn = document.getElementById('streak-mode');
+            
+            if (dailyModeBtn) dailyModeBtn.style.display = 'block';
+            if (dailyCountdown) dailyCountdown.style.display = 'block';
+            if (seedSection) seedSection.style.display = 'block';
+            if (streakModeBtn) streakModeBtn.style.display = 'block';
+            
             if (hintsContainer) {
                 hintsContainer.style.display = 'none';
             }
+            
+            gameConsole.log('Disconnected from Archipelago', 'info');
+            gameConsole.onAPDisconnect();
             this.showStatus('Disconnected from server', 'warning');
         });
-
         apClient.on('server_message', (message) => {
-            this.showStatus(message, 'info');
+            // Log server messages to console (these can include room info, permissions, etc)
+            // Pass directly to console - it handles all types (string, array, object)
+            // Server messages already include timestamps, so don't add our own
+            gameConsole.log(message, 'info', false);
+            // Only show string messages in status bar, not arrays/objects
+            if (typeof message === 'string') {
+                this.showStatus(message, 'info');
+            }
         });
+
+
     }
 
     /**
@@ -293,13 +425,13 @@ export class APConnection {
         const portInput = document.getElementById('ap-port');
         const slotInput = document.getElementById('ap-slot');
         const passwordInput = document.getElementById('ap-password');
-        const deathLinkInput = document.getElementById('ap-deathlink');
         
         const address = addressInput?.value || 'archipelago.gg';
-        const port = parseInt(portInput?.value || '38281');
+        const port = parseInt(portInput?.value || '');
         const slot = slotInput?.value;
         const password = passwordInput?.value || '';
-        const deathLink = deathLinkInput?.checked || false;
+        const deathLink = this.deathLinkState;
+        const deathLinkGroup = this.deathLinkGroupState;
 
         if (!slot || slot.trim() === '') {
             this.showStatus('Please enter a slot name', 'error');
@@ -309,7 +441,7 @@ export class APConnection {
         this.showStatus('Connecting...', 'info');
         
         const event = new CustomEvent('ap-connect-request', {
-            detail: { address, port, slot, password, deathLink }
+            detail: { address, port, slot, password, deathLink, deathLinkGroup }
         });
         document.dispatchEvent(event);
     }

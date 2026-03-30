@@ -8,6 +8,7 @@ import { ScrambleManager } from './ScrambleManager.js';
 import { ScrambleUI } from './ScrambleUI.js';
 import { LeaderboardManager } from './LeaderboardManager.js';
 import { APConnection } from '../components/APConnection.js';
+import { Console, gameConsole } from '../components/Console.js';
 import { apClient } from '../archipelago/client.js';
 import { DiscordManager } from '../discord/DiscordManager.js';
 import { MusicManager } from '../audio/MusicManager.js';
@@ -324,7 +325,9 @@ export default class GameApp {
 
         // Game controls
         document.getElementById('guess-button')?.addEventListener('click', () => this.makeGuess());
-        document.getElementById('skip-button')?.addEventListener('click', () => this.skipCharacter());
+        document.getElementById('skip-button')?.addEventListener('click', () => {
+            this.skipCharacter();
+        });
         document.getElementById('quit-daily-button')?.addEventListener('click', () => this.quitDailyGame());
         document.getElementById('mute-button')?.addEventListener('click', () => this.toggleMute());
         document.getElementById('play-again').addEventListener('click', () => {
@@ -360,16 +363,32 @@ export default class GameApp {
             this.handleAPConnection(event.detail);
         });
 
+        document.addEventListener('ap-disconnect-request', () => {
+            apClient.disconnect();
+        });
+
         // Death link events
-        document.addEventListener('death_link_received', () => {
+        document.addEventListener('death_link_received', (event) => {
+            console.log('[Death Link Event Fired]', event.detail);
+            console.log('[DeathLink] Death link received! Forcing skip...');
+            gameConsole.log(`Death Link received from ${event.detail.source}!`, 'error');
             if (this.gameStarted) {
+                console.log('[DeathLink] Game is started, executing skip...');
                 this.skipCharacter(true);
+            } else {
+                console.log('[DeathLink] Game is not started, skipping execution');
             }
         });
 
-        document.addEventListener('death_link_triggered', () => {
+        document.addEventListener('death_link_triggered', (event) => {
+            console.log('[Death Link Triggered Event Fired]', event.detail);
+            console.log('[DeathLink] Death link triggered! Forcing skip...');
+            gameConsole.log('Sent Death Link to other players', 'warning');
             if (this.gameStarted) {
+                console.log('[DeathLink] Game is started, executing skip...');
                 this.skipCharacter(true);
+            } else {
+                console.log('[DeathLink] Game is not started, skipping execution');
             }
         });
     }
@@ -558,16 +577,18 @@ export default class GameApp {
         document.getElementById('other-dialog').classList.add('hidden');
     }
 
-    async handleAPConnection({ address, port, slot, password, deathLink }) {
+    async handleAPConnection({ address, port, slot, password, deathLink, deathLinkGroup }) {
         try {
             apClient.setGameMode(this.gameMode);
-            const success = await apClient.connect(address, port, slot, password, deathLink);
+            const success = await apClient.connect(address, port, slot, password, deathLink, deathLinkGroup);
             
             if (success) {
-                console.log('Connected to Archipelago successfully');
+                const groupText = deathLinkGroup ? ` [Group: ${deathLinkGroup}]` : '';
+                gameConsole.log(`Connected to Archipelago: ${slot}${groupText}`, 'success');
+                gameConsole.onAPConnect();
             }
         } catch (error) {
-            console.error('Failed to connect to Archipelago:', error);
+            gameConsole.log(`Failed to connect to Archipelago: ${error.message}`, 'error');
         }
     }
 
@@ -822,6 +843,12 @@ export default class GameApp {
     handleScrambleGuess(guess) {
         const isCorrect = this.scrambleManager.isCorrectGuess(guess);
         
+        // In main modes with Archipelago, scramble has 1 guess limit (auto-skip on first wrong guess)
+        if (apClient.isConnected() && !this.isStreakMode && !isCorrect) {
+            this.handleIncorrectGuess();
+            return;
+        }
+        
         if (isCorrect) {
             this.handleCorrectGuess();
         } else {
@@ -856,6 +883,13 @@ export default class GameApp {
         // Submit to Archipelago if connected
         if (apClient.isConnected()) {
             apClient.submitGuess(characterName, { correct: characterName === this.chosenCharacter });
+        }
+        
+        // Check if max guesses exceeded for main modes when Archipelago is connected
+        const maxGuesses = this.getMaxGuessesForMode(this.gameMode);
+        if (apClient.isConnected() && !this.isStreakMode && this.guessHistory.length >= maxGuesses && characterName !== this.chosenCharacter) {
+            this.handleIncorrectGuess();
+            return;
         }
         
         if (characterName === this.chosenCharacter) {
@@ -1014,6 +1048,20 @@ export default class GameApp {
     }
     
     handleIncorrectGuess() {
+        console.log('[Incorrect Guess Handler] Called');
+        
+        // Send death link when max guesses exceeded
+        if (apClient.isConnected() && apClient.isDeathLinkEnabled()) {
+            console.log('[DeathLink] Sending death link: Max guesses exceeded');
+            gameConsole.log('Sending death link - Max guesses exceeded', 'warning');
+            apClient.sendDeathLink('Max guesses exceeded');
+        } else {
+            console.log('[DeathLink] Cannot send on max guesses - AP state:', {
+                isConnected: apClient.isConnected(),
+                isDeathLinkEnabled: apClient.isDeathLinkEnabled()
+            });
+        }
+        
         if (this.isStreakMode) {
             this.endStreak();
         } else {
@@ -1137,8 +1185,9 @@ export default class GameApp {
         // Don't allow skipping in daily mode
         if (this.gameMode === 'daily') return;
         
-        if (isDeathLink && apClient.isConnected() && apClient.isDeathLinkEnabled()) {
-            apClient.sendDeathLink('Received death link');
+        // Send death link to other players if this skip was player-triggered (not received)
+        if (!isDeathLink && apClient.isConnected() && apClient.isDeathLinkEnabled()) {
+            apClient.sendDeathLink('Player gave up');
         }
         
         if (this.isStreakMode) {
