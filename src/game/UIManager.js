@@ -8,9 +8,11 @@ export class UIManager {
     /**
      * Initializes the UI manager.
      * @param {Object} supabase - Supabase client instance for database operations
+     * @param {Object} discordManager - Discord manager instance for native sharing
      */
-    constructor(supabase) {
+    constructor(supabase, discordManager) {
         this.supabase = supabase;
+        this.discordManager = discordManager;
         this.currentCharacter = null;
     }
 
@@ -94,6 +96,7 @@ export class UIManager {
         const resultsTable = document.getElementById('results-table-final');
         const finalTime = document.getElementById('final-time');
         const gameMode = window.gameMode;
+        const shareDiscordBtn = document.getElementById('share-discord-btn');
         
         this.currentCharacter = character;
         
@@ -142,6 +145,15 @@ export class UIManager {
             } else {
                 seedContainer.classList.remove('hidden');
                 gameSeed.textContent = seed;
+            }
+        }
+        
+        // Show/hide Discord share button
+        if (shareDiscordBtn) {
+            if (isInDiscord && this.discordManager && this.discordManager.isInDiscordEnvironment()) {
+                shareDiscordBtn.classList.remove('hidden');
+            } else {
+                shareDiscordBtn.classList.add('hidden');
             }
         }
         
@@ -285,6 +297,8 @@ export class UIManager {
         const text = encodeURIComponent(`${dailyTitle} \n \n${emojiGrid} \n \n https://faustdle.com #OnePiece`);
         window.open(`https://bsky.app/intent/compose?text=${text}`, '_blank');
     }
+
+
 
     addDailyTitle() {
         this.removeDailyTitle();

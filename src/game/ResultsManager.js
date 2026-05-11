@@ -84,7 +84,10 @@ export class ResultsManager {
      */
     generateEmojiGrid(guessHistory) {
         return [...guessHistory].reverse().map(guess => {
-            return guess.map(result => {
+            // Handle both formats: array of results or array of { name, results }
+            const resultsArray = guess.results || guess;
+            
+            return resultsArray.map(result => {
                 if (result.match) {
                     return '🟩';
                 } else if (result.direction === 'up') {

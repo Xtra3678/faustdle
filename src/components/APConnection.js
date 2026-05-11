@@ -77,7 +77,7 @@ export class APConnection {
         addressGroup.className = 'input-group';
         const addressInput = document.createElement('input');
         addressInput.type = 'text';
-        addressInput.id = 'ap-address';
+        addressInput.id = 'dialog-ap-address';
         addressInput.placeholder = 'Server address';
         addressInput.value = 'archipelago.gg';
         addressGroup.appendChild(addressInput);
@@ -88,7 +88,7 @@ export class APConnection {
         portGroup.className = 'input-group';
         const portInput = document.createElement('input');
         portInput.type = 'number';
-        portInput.id = 'ap-port';
+        portInput.id = 'dialog-ap-port';
         portInput.placeholder = 'Port';
         portInput.value = '';
         portGroup.appendChild(portInput);
@@ -99,7 +99,7 @@ export class APConnection {
         slotGroup.className = 'input-group';
         const slotInput = document.createElement('input');
         slotInput.type = 'text';
-        slotInput.id = 'ap-slot';
+        slotInput.id = 'dialog-ap-slot';
         slotInput.placeholder = 'Slot name';
         slotGroup.appendChild(slotInput);
         dialogContent.appendChild(slotGroup);
@@ -109,7 +109,7 @@ export class APConnection {
         passwordGroup.className = 'input-group';
         const passwordInput = document.createElement('input');
         passwordInput.type = 'password';
-        passwordInput.id = 'ap-password';
+        passwordInput.id = 'dialog-ap-password';
         passwordInput.placeholder = 'Password (optional)';
         passwordGroup.appendChild(passwordInput);
         dialogContent.appendChild(passwordGroup);
@@ -124,7 +124,7 @@ export class APConnection {
         label.style.width = 'fit-content';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.id = 'ap-deathlink';
+        checkbox.id = 'dialog-ap-deathlink';
         const labelText = document.createTextNode('Enable Death Link');
         label.appendChild(labelText);
         label.appendChild(checkbox);
@@ -144,7 +144,7 @@ export class APConnection {
         groupGroup.className = 'input-group';
         const groupInput = document.createElement('input');
         groupInput.type = 'text';
-        groupInput.id = 'ap-deathlink-group';
+        groupInput.id = 'dialog-ap-deathlink-group';
         groupInput.placeholder = 'Death Link Group (optional)';
         
         // Attach listeners to store group value in instance variable
@@ -378,13 +378,24 @@ export class APConnection {
      * @param {string} [type='info'] - Message type ('info', 'success', 'error', 'warning')
      */
     showStatus(message, type = 'info') {
-        const statusContainer = document.getElementById('ap-connection-status');
+        // Try the dynamic dialog status first, then fall back to static HTML
+        let statusContainer = document.getElementById('ap-connection-status');
+        if (!statusContainer) {
+            statusContainer = document.getElementById('ap-status');
+        }
+        
         const statusMessage = statusContainer?.querySelector('.status-message');
         
         if (statusContainer && statusMessage) {
             statusContainer.className = 'ap-status';
+            statusContainer.classList.remove('hidden');
             statusContainer.classList.add(type, 'visible');
             statusMessage.textContent = message;
+            
+            // Log errors and warnings to console as well for better debugging
+            if (type === 'error' || type === 'warning') {
+                console.warn('[APConnection Status]', message);
+            }
         }
     }
 
@@ -421,10 +432,25 @@ export class APConnection {
      * Validates input and initiates connection to AP server
      */
     async handleConnect() {
-        const addressInput = document.getElementById('ap-address');
-        const portInput = document.getElementById('ap-port');
-        const slotInput = document.getElementById('ap-slot');
-        const passwordInput = document.getElementById('ap-password');
+        // Try to get values from the dynamic dialog first (dialog- prefix)
+        let addressInput = document.getElementById('dialog-ap-address');
+        let portInput = document.getElementById('dialog-ap-port');
+        let slotInput = document.getElementById('dialog-ap-slot');
+        let passwordInput = document.getElementById('dialog-ap-password');
+        
+        // Fall back to static HTML form if dialog elements not found
+        if (!addressInput) {
+            addressInput = document.getElementById('ap-address');
+        }
+        if (!portInput) {
+            portInput = document.getElementById('ap-port');
+        }
+        if (!slotInput) {
+            slotInput = document.getElementById('ap-name'); // Note: static form uses ap-name not ap-slot
+        }
+        if (!passwordInput) {
+            passwordInput = document.getElementById('ap-password');
+        }
         
         const address = addressInput?.value || 'archipelago.gg';
         const port = parseInt(portInput?.value || '');

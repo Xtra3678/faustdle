@@ -95,6 +95,8 @@ export class DiscordProxy {
             // Add Supabase API key to headers as backup
             if (supabaseAnonKey) {
                 proxyHeaders['apikey'] = supabaseAnonKey;
+                // Discord proxy requires Authorization header for POST requests
+                proxyHeaders['Authorization'] = `Bearer ${supabaseAnonKey}`;
             }
 
             // Handle any additional headers from options

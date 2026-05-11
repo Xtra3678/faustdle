@@ -3,10 +3,12 @@
  * Handles Discord OAuth flow and Supabase session management
  */
 export class DiscordAuth {
-    constructor(supabase, discordSDK) {
+    constructor(supabase, discordSDK, discordProxy = null) {
         this.supabase = supabase;
         this.discordSDK = discordSDK;
+        this.discordProxy = discordProxy;
         this.user = null;
+        this.userId = null;
         this.session = null;
         this.isAuthenticated = false;
         this.isDiscordActivity = window.location.href.includes('discordsays.com');
@@ -47,66 +49,133 @@ export class DiscordAuth {
 
     /**
      * Authenticate user with Discord and create Supabase session
+     * SDK has already called authorize() and authenticate() with access token
+     * Now we need to retrieve the authenticated user info
      */
     async authenticateWithDiscord() {
         try {
-            console.log('Starting Discord authentication flow...');
+            console.log('Retrieving Discord user after authentication...');
             
-            // Step 1: Request authorization from Discord with required scopes
-            const { code } = await this.discordSDK.commands.authorize({
-                client_id: this.discordClientId,
-                response_type: 'code',
-                state: '',
-                prompt: 'none',
-                scope: ['identify', 'guilds']
-            });
-
-            console.log('Authorization code received, exchanging for access token via backend...');
-
-            // Step 2: Exchange authorization code for access token via backend
-            // For now, use a placeholder backend URL - in production, this should be your backend
-            const tokenResponse = await fetch('/.proxy/api/token', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ code })
-            }).catch(async (error) => {
-                console.warn('Backend token exchange failed, falling back to anonymous session:', error);
-                // Fallback for development without backend
-                return null;
-            });
-
-            let access_token = null;
-            if (tokenResponse && tokenResponse.ok) {
-                const tokenData = await tokenResponse.json();
-                access_token = tokenData.access_token;
-            }
-
-            // Step 3: Authenticate with Discord using the access token
-            let authResponse = null;
-            if (access_token) {
-                authResponse = await this.discordSDK.commands.authenticate({
-                    access_token
-                });
-                console.log('Discord authentication successful with access token');
-            } else {
-                console.log('No access token available, using anonymous session');
-            }
-
-            // Step 4: Create Supabase session with Discord user data
-            if (authResponse && authResponse.user) {
-                // Authenticated with Discord token
-                return await this.createAuthenticatedSession(authResponse.user, access_token);
-            } else {
-                // Fallback to anonymous session
-                console.log('Falling back to anonymous session');
-                return await this.createAnonymousSession();
-            }
+            // After authenticate() call, user info should be available
+            // Try various methods to get user
+            return await this.tryGetAuthenticatedUser();
+            
         } catch (error) {
             console.error('Discord authentication failed:', error);
+            return await this.createAnonymousSession();
+        }
+    }
+
+    /**
+     * Get user after SDK has been fully authenticated
+     * For Discord Activities, user context is implicit in the Activity frame
+     */
+    async tryGetAuthenticatedUser() {
+        try {
+            console.log('Attempting to get authenticated user from Activity SDK...');
             
-            // Fallback: create anonymous session
+            // Give the SDK a moment to initialize all context
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Method 1: Check authResult stored by DiscordManager
+            if (this.discordSDK?.authResult?.user?.id) {
+                console.log('Got user from SDK.authResult:', this.discordSDK.authResult.user.username);
+                const accessToken = this.discordSDK.authResult.access_token;
+                return await this.createAuthenticatedSession(this.discordSDK.authResult.user, accessToken);
+            }
+            
+            // Method 2: For Activities, check if we have guild/channel context (Activity identity)
+            // This confirms we're in a Discord Activity iframe
+            const authResult = this.discordSDK?.authResult;
+            const guildId = authResult?.guildId || this.discordSDK?.guildId || this.discordSDK?.guild?.id;
+            const channelId = authResult?.channelId || this.discordSDK?.channelId || this.discordSDK?.channel?.id;
+            
+            if (guildId && channelId) {
+                console.log('✓ Activity context confirmed - in Discord Guild:', guildId, 'Channel:', channelId);
+                
+                // For Activities, user ID might come from SDK properties after a moment
+                if (this.discordSDK?.user?.id) {
+                    console.log('Got user from SDK.user:', this.discordSDK.user.username);
+                    return await this.createAuthenticatedSession(this.discordSDK.user, null);
+                }
+                
+                // If still no user, create session for Activity context
+                console.log('Using implicit Activity user context');
+                // Store the context info for use in sharing
+                this.guildId = guildId;
+                this.channelId = channelId;
+                return await this.createAnonymousSession();
+            }
+            
+            // Method 3: Try checking user property after authorize
+            if (this.discordSDK?.user?.id) {
+                console.log('Got user from SDK.user property:', this.discordSDK.user.username);
+                return await this.createAuthenticatedSession(this.discordSDK.user, null);
+            }
+            
+            // Method 4: Check internal SDK user context
+            if (this.discordSDK?._user?.id) {
+                console.log('Got user from SDK._user:', this.discordSDK._user.username);
+                return await this.createAuthenticatedSession(this.discordSDK._user, null);
+            }
+            
+            // Method 5: Try getUser command with identify scope
+            if (this.discordSDK?.commands?.getUser) {
+                try {
+                    console.log('Calling getUser command...');
+                    const userInfo = await this.discordSDK.commands.getUser();
+                    if (userInfo?.id) {
+                        console.log('Got user from getUser():', userInfo.username);
+                        return await this.createAuthenticatedSession(userInfo, null);
+                    }
+                } catch (e) {
+                    console.log('getUser command not available:', e.message);
+                }
+            }
+            
+            // Method 6: Subscribe to CURRENT_USER_UPDATE event
+            try {
+                if (this.discordSDK?.subscribe) {
+                    console.log('Subscribing to CURRENT_USER_UPDATE event...');
+                    
+                    let userReceived = false;
+                    let receiveTimeout;
+                    
+                    const subscriptionId = await this.discordSDK.subscribe('CURRENT_USER_UPDATE', (user) => {
+                        console.log('CURRENT_USER_UPDATE received:', user?.username || user?.id);
+                        if (user?.id) {
+                            this.userId = user.id;
+                            this.user = user;
+                            userReceived = true;
+                            if (receiveTimeout) clearTimeout(receiveTimeout);
+                        }
+                    });
+                    
+                    // Wait for event with timeout
+                    await new Promise(resolve => {
+                        receiveTimeout = setTimeout(() => resolve(), 2000);
+                        const checkInterval = setInterval(() => {
+                            if (userReceived) {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                    
+                    if (userReceived && this.userId) {
+                        console.log('User acquired via CURRENT_USER_UPDATE event');
+                        return await this.createAnonymousSession();
+                    }
+                }
+            } catch (e) {
+                console.log('Could not subscribe to user update event:', e.message);
+            }
+            
+            console.warn('Could not retrieve user from SDK, creating anonymous session');
+            return await this.createAnonymousSession();
+            
+        } catch (e) {
+            console.error('Failed to get authenticated user:', e.message);
             return await this.createAnonymousSession();
         }
     }
@@ -116,6 +185,17 @@ export class DiscordAuth {
      */
     async createAuthenticatedSession(discordUser, accessToken) {
         try {
+            // Store the Discord user ID for later use (e.g., sharing to Discord)
+            this.userId = discordUser.id;
+            console.log('Stored Discord user ID:', this.userId);
+            
+            // If no access token passed, try to get it from SDK authResult
+            let finalAccessToken = accessToken;
+            if (!finalAccessToken && this.discordSDK?.authResult?.access_token) {
+                finalAccessToken = this.discordSDK.authResult.access_token;
+                console.log('Retrieved access token from SDK authResult');
+            }
+            
             // Sign in anonymously with Discord user metadata
             const { data, error } = await this.supabase.auth.signInAnonymously({
                 options: {
@@ -128,7 +208,7 @@ export class DiscordAuth {
                             `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png` : 
                             null,
                         provider: 'discord_sdk',
-                        access_token: accessToken
+                        access_token: finalAccessToken
                     }
                 }
             });
@@ -150,22 +230,45 @@ export class DiscordAuth {
     }
 
     /**
-     * Create an anonymous session for Discord users when OAuth fails
+     * Create an anonymous session for Discord users when SDK auth unavailable
      */
     async createAnonymousSession() {
         try {
+            console.log('Creating anonymous Supabase session...');
+            
             // For anonymous sessions in Discord Activity, try to get basic user context
             let discordUserData = null;
+            let accessToken = null;
             
-            try {
-                // Try to get user from SDK if available - might fail if auth not set up
-                // This is optional and only works if SDK is authenticated
-                const discordUser = await this.discordSDK.commands.getUserId?.();
-                if (discordUser) {
-                    discordUserData = discordUser;
+            // First, check authResult for user and token
+            if (this.discordSDK?.authResult) {
+                if (this.discordSDK.authResult.user?.id) {
+                    discordUserData = this.discordSDK.authResult.user;
+                    this.userId = discordUserData.id;
+                    console.log('Got user from SDK authResult for anonymous session:', discordUserData.username);
                 }
-            } catch (e) {
-                console.log('Could not get Discord user context for anonymous session:', e);
+                if (this.discordSDK.authResult.access_token) {
+                    accessToken = this.discordSDK.authResult.access_token;
+                    console.log('Got access token from SDK authResult for anonymous session');
+                }
+            }
+            
+            // If no user from authResult, try other methods
+            if (!discordUserData) {
+                try {
+                    // Try to get user from SDK if available
+                    if (this.discordSDK?.user?.id) {
+                        discordUserData = this.discordSDK.user;
+                        console.log('Got user from SDK.user property for anonymous session');
+                    } else if (this.discordSDK?.commands?.getUser) {
+                        discordUserData = await this.discordSDK.commands.getUser?.();
+                        if (discordUserData) {
+                            console.log('Got user from SDK commands.getUser() for anonymous session');
+                        }
+                    }
+                } catch (e) {
+                    console.log('Could not get Discord user context for anonymous session:', e.message);
+                }
             }
 
             // Sign in anonymously
@@ -181,7 +284,8 @@ export class DiscordAuth {
                                 `https://cdn.discordapp.com/avatars/${discordUserData.id}/${discordUserData.avatar}.png` : 
                                 null,
                         }),
-                        provider: 'discord_anonymous'
+                        provider: 'discord_anonymous',
+                        access_token: accessToken
                     }
                 }
             });
@@ -193,6 +297,11 @@ export class DiscordAuth {
             this.session = data.session;
             this.user = data.user;
             this.isAuthenticated = true;
+            
+            // Store Discord user ID if available
+            if (discordUserData?.id) {
+                this.userId = discordUserData.id;
+            }
 
             console.log('Anonymous session created');
             return true;
@@ -266,6 +375,34 @@ export class DiscordAuth {
 
     /**
      * Get Discord user info from session metadata
+     */
+    /**
+     * Get Discord user ID
+     */
+    getDiscordUserId() {
+        // Return stored userId from direct authentication
+        if (this.userId) {
+            return this.userId;
+        }
+        // Fall back to user metadata
+        if (this.user?.user_metadata?.discord_id) {
+            return this.user.user_metadata.discord_id;
+        }
+        return null;
+    }
+
+    /**
+     * Set Discord user ID (when fetched later)
+     */
+    setDiscordUserId(userId) {
+        if (userId) {
+            this.userId = userId;
+            console.log('Updated Discord user ID:', userId);
+        }
+    }
+
+    /**
+     * Get Discord user info
      */
     getDiscordUserInfo() {
         if (this.user?.user_metadata) {

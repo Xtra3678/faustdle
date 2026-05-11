@@ -7,6 +7,7 @@ export class DiscordManager {
         this.guessHistory = [];
         this.currentMode = null;
         this.auth = null;
+        this.discordProxy = null;
         this.isDiscordActivity = this.detectDiscordEnvironment();
     }
 
@@ -43,8 +44,11 @@ export class DiscordManager {
         return this.isDiscordActivity;
     }
 
-    async initialize(supabase) {
+    async initialize(supabase, discordProxy = null) {
         try {
+            // Store the proxy for use in auth initialization
+            this.discordProxy = discordProxy;
+            
             // Add Discord embed meta tags
             this.addDiscordMetaTags();
 
@@ -63,56 +67,251 @@ export class DiscordManager {
 
     async initializeDiscordSDK(supabase) {
         try {
-            // Import Discord SDK with better error handling
-            console.log('Importing Discord SDK...');
-            const module = await import('@discord/embedded-app-sdk');
+            // Capture clientId OUTSIDE the async to avoid context loss
+            const clientId = String(this.clientId);
+            console.log('SDK init - clientId captured:', clientId, 'type:', typeof clientId);
             
-            // Try different possible exports
-            const DiscordSDK = module.DiscordSDK || module.Discord || module.default;
-            
-            if (!DiscordSDK) {
-                console.error('Available exports:', Object.keys(module));
-                throw new Error('Discord SDK constructor not found in module');
+            if (typeof clientId !== 'string' || !clientId) {
+                throw new Error(`Invalid clientId: must be a non-empty string, got ${JSON.stringify(clientId)}`);
             }
 
-            console.log('Creating Discord SDK instance...');
-            
-            // Create SDK instance with proper configuration
-            // Discord SDK v1.9.0+ expects clientId as a direct string parameter or in specific format
-            this.sdk = new DiscordSDK(this.clientId);
+            // Wrap the entire SDK initialization in a timeout to prevent hanging
+            const initPromise = (async () => {
+                // Import Discord SDK
+                console.log('Importing Discord SDK...');
+                const sdkModule = await import('@discord/embedded-app-sdk');
+                const DiscordSDK = sdkModule.DiscordSDK || sdkModule.default;
+                
+                if (!DiscordSDK) {
+                    throw new Error('Discord SDK constructor not found in module');
+                }
 
-            console.log('Discord SDK created, waiting for ready...');
-            
-            // Wait for SDK to be ready
-            await this.sdk.ready();
-            
-            this.connected = true;
-            this.startTimestamp = Date.now();
-            
-            console.log('Discord SDK ready! Connected successfully.');
-            
-            // Initialize authentication if Supabase is available
-            if (supabase) {
-                await this.initializeAuth(supabase);
-            }
+                console.log('Creating Discord SDK instance with clientId:', clientId);
+                
+                const sdkInstance = new DiscordSDK(clientId);
+                this.sdk = sdkInstance;
+                console.log('SDK instantiated successfully');
+                
+                // First: Wait for SDK ready
+                console.log('Waiting for SDK ready...');
+                try {
+                    const readyPromise = this.sdk.ready();
+                    const readyTimeout = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('SDK ready timeout')), 8000)
+                    );
+                    
+                    await Promise.race([readyPromise, readyTimeout]);
+                    console.log('SDK ready event fired successfully');
+                } catch (readyError) {
+                    console.warn('SDK ready timeout:', readyError.message);
+                }
 
-            // Set initial activity
-            await this.setDefaultActivity();
+                // Second: Authorize with Discord to get authorization code
+                console.log('Authorizing SDK with Discord...');
+                const { code } = await this.sdk.commands.authorize({
+                    client_id: clientId,
+                    response_type: 'code',
+                    state: Math.random().toString(36).substring(7),
+                    prompt: 'none',
+                    scope: [
+                        'guilds.members.read',
+                        'rpc.activities.write',
+                        'identify',
+                        'applications.commands',
+                        'guilds'
+                    ]
+                });
+
+                console.log('SDK authorization successful, got code:', code ? 'yes' : 'no');
+                
+                // Third: Exchange auth code for user info and access token
+                // Use the DiscordProxy to bypass CSP restrictions
+                console.log('Exchanging authorization code for user info...');
+                
+                // For Activities, we need to get user info through backend token exchange
+                try {
+                    if (this.discordProxy) {
+                        const tokenResponse = await this.discordProxy.fetch(
+                            'https://qrprexuziojupqvvdefy.supabase.co/functions/v1/discord-token-exchange',
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ code })
+                            }
+                        );
+                        
+                        const tokenData = await tokenResponse.json();
+                        console.log('Token exchange response received');
+                        console.log('Token exchange full response:', {
+                            keys: Object.keys(tokenData),
+                            user: tokenData.user,
+                            hasAccessToken: !!tokenData.access_token,
+                            hasUserId: !!tokenData.user?.id,
+                            userId: tokenData.user?.id,
+                        });
+                        
+                        // Token data may or may not include user info depending on Edge Function deployment
+                        let user = tokenData.user;
+                        
+                        if (tokenData.access_token) {
+                            // Authenticate the SDK with the access token - CRITICAL for setActivity() to work
+                            // The authenticate() command returns AuthenticateResponse which includes the user object
+                            let user = null;
+                            try {
+                                console.log('Authenticating SDK with access token...');
+                                const authResponse = await this.sdk.commands.authenticate({ 
+                                    access_token: tokenData.access_token 
+                                });
+                                
+                                // Get user from the authenticate() response
+                                if (authResponse?.user?.id) {
+                                    user = authResponse.user;
+                                    console.log('✓ Got user from authenticate() response:', {
+                                        id: user.id,
+                                        username: user.username,
+                                        discriminator: user.discriminator
+                                    });
+                                } else {
+                                    console.warn('authenticate() response missing user data:', authResponse);
+                                }
+                            } catch (authError) {
+                                console.error('Failed to authenticate SDK:', authError);
+                            }
+                            
+                            // If authenticate() didn't return user data, fetch from Discord API as fallback
+                            if (!user?.id) {
+                                try {
+                                    console.log('Fetching user from Discord API as fallback...');
+                                    const userResponse = await this.discordProxy.fetch(
+                                        'https://discord.com/api/v10/users/@me',
+                                        {
+                                            method: 'GET',
+                                            headers: {
+                                                'Authorization': `Bearer ${tokenData.access_token}`
+                                            }
+                                        }
+                                    );
+                                    
+                                    if (userResponse.ok) {
+                                        user = await userResponse.json();
+                                        console.log('✓ Got user from Discord API:', {
+                                            id: user?.id,
+                                            username: user?.username,
+                                            discriminator: user?.discriminator
+                                        });
+                                    } else {
+                                        console.log('Discord API user fetch failed:', userResponse.status, userResponse.statusText);
+                                    }
+                                } catch (fetchUserError) {
+                                    console.log('Discord API fetch error:', fetchUserError.message);
+                                }
+                            }
+                            
+                            if (user?.id) {
+                                console.log('✓ Successfully obtained Discord user ID:', user.id);
+                                this.authResult = {
+                                    user: user,
+                                    access_token: tokenData.access_token,
+                                    authenticated: true
+                                };
+                            } else {
+                                console.warn('⚠️ No user data available from Discord API or token exchange');
+                                this.authResult = {
+                                    access_token: tokenData.access_token,
+                                    authenticated: true
+                                };
+                            }
+                            
+                            // Also store authResult on SDK for DiscordAuth to access
+                            if (this.sdk) {
+                                this.sdk.authResult = this.authResult;
+                            }
+                        } else {
+                            console.warn('Token exchange incomplete:', tokenData);
+                            // Activity still valid even without explicit user
+                            this.authResult = {
+                                authenticated: true,
+                                code
+                            };
+                        }
+                    } else {
+                        console.log('DiscordProxy not available, using Activity context only');
+                        this.authResult = {
+                            authenticated: true,
+                            code
+                        };
+                    }
+                } catch (tokenError) {
+                    console.warn('Token exchange failed:', tokenError.message);
+                    // Continue with Activity context anyway
+                    this.authResult = {
+                        authenticated: true,
+                        code
+                    };
+                }
+                
+                // Capture Activity context (guild/channel) for additional context
+                const guildId = this.sdk?.guild?.id || this.sdk?.guildId;
+                const channelId = this.sdk?.channel?.id || this.sdk?.channelId;
+                if (channelId) {
+                    this.authResult.channelId = channelId;
+                    console.log('Activity channel identified:', channelId);
+                }
+                if (guildId) {
+                    this.authResult.guildId = guildId;
+                }
+                
+                // Extract interaction token from entry point command launch
+                // This is critical for message editing support
+                const interactionToken = this.sdk?.interaction?.token;
+                if (interactionToken) {
+                    this.authResult.interactionToken = interactionToken;
+                    console.log('✓ Entry point interaction token captured:', interactionToken.substring(0, 20) + '...');
+                } else {
+                    console.log('⚠️ No interaction token found on SDK - entry point may not be properly configured');
+                }
+                
+                this.connected = true;
+                this.startTimestamp = Date.now();
+                
+                console.log('Discord SDK initialization complete');
+                
+                // Initialize authentication if Supabase is available
+                if (supabase) {
+                    await this.initializeAuth(supabase, this.discordProxy);
+                }
+
+                // Set initial activity
+                try {
+                    await this.setDefaultActivity();
+                } catch (e) {
+                    console.log('Could not set default activity:', e.message);
+                }
+            })();
+            
+            // Add overall timeout for the entire initialization
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Discord SDK initialization timeout')), 20000)
+            );
+            
+            await Promise.race([initPromise, timeoutPromise]);
+            console.log('Discord SDK initialization complete');
             
         } catch (error) {
             console.error('Discord SDK initialization failed:', error);
-            throw error;
+            // Don't throw - allow app to continue without Discord
+            this.connected = false;
         }
     }
 
-    async initializeAuth(supabase) {
+    async initializeAuth(supabase, discordProxy = null) {
         try {
             console.log('Initializing Discord authentication...');
             
             // Import auth module
             const { DiscordAuth } = await import('../auth/DiscordAuth.js');
             
-            this.auth = new DiscordAuth(supabase, this.sdk);
+            this.auth = new DiscordAuth(supabase, this.sdk, discordProxy);
             const authSuccess = await this.auth.initialize();
             
             if (authSuccess) {
@@ -376,6 +575,104 @@ export class DiscordManager {
     }
 
     /**
+     * Sync game state to Discord - updates the activity message in real-time
+     * Call this whenever the game board changes or game ends
+     */
+    async syncGameStateToDiscord(gameData) {
+        if (!this.connected || !this.sdk) {
+            console.log('SDK not connected, skipping Discord sync');
+            return;
+        }
+        
+        const { character, mode, gridString, guessCount, totalTime } = gameData;
+        const modeText = this.getModeText(mode || this.currentMode);
+        
+        try {
+            const activity = {
+                type: 0, // Playing
+                details: `Faustdle - ${modeText}`,
+                state: `${guessCount} guesses • ${totalTime}`,
+                assets: {
+                    large_image: 'game_logo',
+                    large_text: gridString || `Playing Faustdle as ${character}`
+                }
+            };
+            
+            console.log('Calling setActivity with:', {
+                details: activity.details,
+                state: activity.state,
+                gridString: gridString,
+                guessCount,
+                totalTime
+            });
+            
+            const result = await this.sdk.commands.setActivity({ activity });
+            
+            console.log('✓ Game state synced to Discord', {
+                character,
+                guessCount,
+                totalTime,
+                result
+            });
+        } catch (error) {
+            console.error('Failed to sync game state to Discord:', error);
+        }
+    }
+
+    /**
+     * Post shareable activity results to Discord using the /share slash command
+     * Note: Discord Activities cannot directly invoke slash commands.
+     * Users must type /share in Discord chat to post their results.
+     */
+    async startActivityInvite(gameData) {
+        if (!this.connected || !this.sdk) {
+            console.log('SDK not connected, cannot initiate share');
+            return;
+        }
+
+        const { character, mode, gridString, guessCount, totalTime } = gameData;
+        const modeText = this.getModeText(mode || this.currentMode);
+
+        try {
+            console.log('Share initiated - user must use /share command in Discord');
+            
+            // Show a share link dialog to the user
+            const shareUrl = this.constructActivityUrl(gameData);
+            const result = await this.sdk.commands.shareLink({
+                message: `📊 I completed Faustdle - ${modeText}!\n\nTime: ${totalTime}`,
+                custom_id: 'faustdle_result'
+            });
+
+            if (result?.success) {
+                console.log('✓ Share link shown to user');
+                return { success: true, method: 'share_link' };
+            } else {
+                console.log('User dismissed share dialog');
+                return { success: false, reason: 'dismissed' };
+            }
+
+        } catch (error) {
+            console.error('Error showing share dialog:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Construct an activity share URL with game data
+     */
+    constructActivityUrl(gameData) {
+        const { character, mode, gridString, guessCount, totalTime } = gameData;
+        const params = new URLSearchParams({
+            character: character || '',
+            mode: mode || 'daily',
+            grid: gridString || '',
+            guesses: guessCount || 0,
+            time: totalTime || ''
+        });
+        return `https://faustdle.com?activity=${params.toString()}`;
+    }
+
+    /**
      * Reset to default activity
      */
     clearGuesses() {
@@ -412,5 +709,91 @@ export class DiscordManager {
         this.startTimestamp = null;
         this.guessHistory = [];
         this.currentMode = null;
+    }
+
+    /**
+     * Invoke the /share command by calling our edge function
+     * The edge function queries the database for today's results and posts to Discord
+     */
+    async invokeShareGameCommand(gameData) {
+        try {
+            console.log('=== Share Command Invocation ===');
+            console.log('Game data being sent:', {
+                userId: gameData.userId,
+                channelId: gameData.channelId,
+                character: gameData.character,
+                mode: gameData.mode,
+                time: gameData.time,
+                gridLength: gameData.grid?.length || 0
+            });
+
+            // Store game data for potential fallback
+            this.lastGameData = {
+                character: gameData.character,
+                mode: gameData.mode,
+                grid: gameData.grid,
+                time: gameData.time,
+                userId: gameData.userId,
+                channelId: gameData.channelId,
+                timestamp: Date.now()
+            };
+
+            // Build the payload for the edge function
+            // This format works with the "legacy direct POST" path in the edge function
+            const payload = {
+                type: 2,  // APPLICATION_COMMAND
+                user: {
+                    id: gameData.userId
+                },
+                member: {
+                    user: {
+                        id: gameData.userId
+                    }
+                },
+                channel_id: gameData.channelId,
+                data: {
+                    name: 'share'
+                }
+            };
+
+            console.log('Sending payload to edge function:', JSON.stringify(payload));
+
+            // Call the edge function
+            if (this.discordProxy) {
+                const response = await this.discordProxy.fetch(
+                    'https://qrprexuziojupqvvdefy.supabase.co/functions/v1/post-game-results',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }
+                );
+
+                console.log('Edge function response status:', response.status, response.statusText);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Edge function error response:', errorText);
+                    throw new Error(`Edge function failed: ${response.status} ${response.statusText} - ${errorText}`);
+                }
+
+                const result = await response.json();
+                console.log('✓ Edge function response:', result);
+                
+                // Log the actual response message
+                if (result.data?.content) {
+                    console.log('Discord message content:', result.data.content);
+                }
+                
+                return result;
+            } else {
+                console.error('Discord proxy not available');
+                return { success: false, reason: 'proxy_unavailable' };
+            }
+        } catch (error) {
+            console.error('❌ Error invoking share command:', error.message);
+            console.error('Full error:', error);
+            throw error;
+        }
     }
 }

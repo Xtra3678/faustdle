@@ -9,12 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "seedrandom": "^3.0.5",
-    "ws": "^8.16.0",
+    "@discord/embedded-app-sdk": "^1.0.0",
     "@supabase/supabase-js": "^2.39.3",
-    "@discord/embedded-app-sdk": "^1.0.0"
+    "seedrandom": "^3.0.5",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
+    "supabase": "^2.84.5",
     "vite": "^5.0.10"
   }
 }

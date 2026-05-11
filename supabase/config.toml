@@ -1,0 +1,4 @@
+# Supabase Configuration
+
+[functions.post-game-results]
+verify_jwt = false

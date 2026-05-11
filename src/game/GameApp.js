@@ -306,7 +306,7 @@ export default class GameApp {
         this.isStreakMode = isFromStreak;
         dialog.classList.remove('hidden');
     }
-
+ 
     setupEventListeners() {
         // Mode selection buttons
         document.getElementById('normal-mode')?.addEventListener('click', () => this.startGame('normal'));
